@@ -28,7 +28,7 @@ A Jenkins plugin that monitors build queue depth, executor utilization, build-du
 mvn clean package -DskipTests
 ```
 
-The installable plugin artifact is produced at `target/queue-monitor.hpi`.
+The installable plugin artifact is produced at `target/queue-monitor-${project.version}.hpi`.
 
 To run tests:
 
