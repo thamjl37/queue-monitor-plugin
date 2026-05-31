@@ -1,0 +1,82 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:f="/lib/form">
+
+  <f:section title="Queue Depth Monitor - General">
+
+    <f:entry title="Poll Interval (seconds)"
+             description="How often the background collector samples queue and executor state. Minimum 10 s.">
+      <f:number field="pollIntervalSeconds" min="10" step="5"/>
+    </f:entry>
+
+    <f:entry title="Data Retention (hours)"
+             description="How many hours of snapshot history to keep in memory.">
+      <f:number field="retentionHours" min="1" step="1"/>
+    </f:entry>
+
+    <f:entry title="Max Snapshots"
+             description="Hard cap on in-memory snapshots regardless of retention. Protects heap.">
+      <f:number field="maxSnapshots" min="100" step="100"/>
+    </f:entry>
+
+    <f:entry title="Build Duration Anomaly Factor"
+             description="Flagged when duration exceeds baseline multiplied by this factor. E.g. 1.5 means 50% above average.">
+      <f:textbox field="buildDurationAnomalyFactor"/>
+    </f:entry>
+
+    <f:entry title="Baseline Sample Count"
+             description="Minimum completed builds before anomaly detection activates for a job.">
+      <f:number field="baselineSampleCount" min="3" step="1"/>
+    </f:entry>
+
+    <f:entry title="Queue Depth Alert Threshold"
+             description="Log warning when total queue depth reaches this value. Set to 0 to disable.">
+      <f:number field="queueDepthAlertThreshold" min="0" step="1"/>
+    </f:entry>
+
+    <f:entry title="Saturation Alert Poll Count"
+             description="Consecutive saturated polls before a label saturation alert is raised.">
+      <f:number field="saturationAlertPollCount" min="1" step="1"/>
+    </f:entry>
+
+  </f:section>
+
+  <f:section title="Queue Depth Monitor - Executor Scaling">
+
+    <f:entry title="Enable Dynamic Label Assignment"
+             description="Recommend routing waiting jobs to compatible agents with free executors.">
+      <f:checkbox field="dynamicLabelEnabled"/>
+    </f:entry>
+
+    <f:entry title="Enable Resource-Aware Executor Scaling"
+             description="Automatically increase executor count on an agent when CPU and memory headroom is available.">
+      <f:checkbox field="executorScalingEnabled"/>
+    </f:entry>
+
+    <f:entry title="Max Executors Per Agent"
+             description="Safety ceiling on auto-scaled executor count per agent.">
+      <f:number field="maxExecutorsPerAgent" min="1" step="1"/>
+    </f:entry>
+
+    <f:entry title="Min Executors Per Agent"
+             description="Floor for automatic scale-down. Executors will never be reduced below this value even when the queue is empty.">
+      <f:number field="minExecutorsPerAgent" min="1" step="1"/>
+    </f:entry>
+
+    <f:entry title="Min Free CPU % for Scaling"
+             description="Minimum free system CPU percent required before adding an executor.">
+      <f:number field="scalingMinFreeCpuPercent" min="5" step="5"/>
+    </f:entry>
+
+    <f:entry title="Min Free Memory for Scaling (MB)"
+             description="Minimum free OS physical memory in MB required before adding an executor.">
+      <f:number field="scalingMinFreeMemoryMb" min="128" step="128"/>
+    </f:entry>
+
+    <f:entry title="Scaling Cooldown (seconds)"
+             description="Minimum seconds between any two successive scaling decisions (up or down) on the same agent. This is a hard floor — always respected regardless of queue depth.">
+      <f:number field="scalingCooldownSeconds" min="60" step="30"/>
+    </f:entry>
+
+  </f:section>
+
+</j:jelly>

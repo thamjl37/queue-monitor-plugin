@@ -1,0 +1,151 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:t="/lib/hudson">
+
+  <l:layout title="Queue Monitor" permission="${app.READ}">
+    <st:include page="sidepanel.jelly" it="${app}" optional="true"/>
+    <l:main-panel>
+
+      <style>
+        .qm-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+        .qm-toolbar input[type=text] { padding:4px 8px; border:1px solid #ccc; border-radius:3px; font-size:13px; }
+        .qm-toolbar select { padding:4px 6px; border:1px solid #ccc; border-radius:3px; font-size:13px; }
+        .qm-pager { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:13px; color:#555; }
+        .qm-pager button { padding:3px 10px; border:1px solid #bbb; border-radius:3px; background:#f5f5f5; cursor:pointer; font-size:13px; }
+        .qm-pager button:disabled { opacity:0.4; cursor:default; }
+        .qm-pager .qm-page-info { min-width:120px; text-align:center; }
+      </style>
+
+      <h1>Queue Depth Monitor</h1>
+
+      <div id="qm-summary" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;">
+        <div class="qm-card">
+          <div class="qm-label">Total Queue Depth</div>
+          <div class="qm-value" id="val-queue">—</div>
+        </div>
+        <div class="qm-card">
+          <div class="qm-label">Executor Utilization</div>
+          <div class="qm-value" id="val-util">—</div>
+        </div>
+        <div class="qm-card">
+          <div class="qm-label">Busy / Total Executors</div>
+          <div class="qm-value" id="val-exec">—</div>
+        </div>
+      </div>
+
+      <!-- ── Label Status ───────────────────────────────────────────────── -->
+      <h2>Label Status</h2>
+      <div class="qm-toolbar">
+        <input type="text" id="label-filter" placeholder="Filter by label…" style="width:200px;"/>
+        <span style="margin-left:auto;font-size:13px;color:#555;">
+          Page size:
+          <select id="label-page-size">
+            <option value="15" selected="selected">15</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">All</option>
+          </select>
+        </span>
+      </div>
+      <table class="sortable bigtable" id="label-table" style="width:100%;border:1px solid #ccc;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Queue Depth</th>
+            <th>Busy Executors</th>
+            <th>Total Executors</th>
+            <th>Saturated?</th>
+          </tr>
+        </thead>
+        <tbody id="label-tbody">
+          <tr><td colspan="5">Loading…</td></tr>
+        </tbody>
+      </table>
+      <div class="qm-pager" id="label-pager">
+        <button id="label-prev">◀ Prev</button>
+        <span class="qm-page-info" id="label-page-info"></span>
+        <button id="label-next">Next ▶</button>
+      </div>
+
+      <!-- ── Trend chart ────────────────────────────────────────────────── -->
+      <h2 style="margin-top:32px;">Queue Depth Trend (last 60 samples)</h2>
+      <canvas id="qm-chart" width="900" height="220" style="width:50%;border:1px solid #ccc;border-radius:4px;"/>
+
+      <!-- ── Recent Execution Pickups ──────────────────────────────────── -->
+      <h2 style="margin-top:32px;">Recent Execution Pickups</h2>
+      <div class="qm-toolbar">
+        <input type="text" id="pickup-filter-job"   placeholder="Filter by job…"   style="width:180px;"/>
+        <input type="text" id="pickup-filter-label" placeholder="Filter by label…" style="width:180px;"/>
+        <span style="margin-left:auto;font-size:13px;color:#555;">
+          Page size:
+          <select id="pickup-page-size">
+            <option value="20" selected="selected">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </span>
+      </div>
+      <table class="sortable bigtable" style="width:100%;border:1px solid #ccc;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th>Time</th><th>Job</th><th>Agent</th><th>Label</th><th>Queue Wait</th>
+          </tr>
+        </thead>
+        <tbody id="pickup-tbody">
+          <tr><td colspan="5">Loading…</td></tr>
+        </tbody>
+      </table>
+      <div class="qm-pager" id="pickup-pager">
+        <button id="pickup-prev">◀ Prev</button>
+        <span class="qm-page-info" id="pickup-page-info"></span>
+        <button id="pickup-next">Next ▶</button>
+      </div>
+
+      <!-- ── Executor Scaling Audit ─────────────────────────────────────── -->
+      <h2 style="margin-top:32px;">Executor Scaling Audit</h2>
+      <div class="qm-toolbar">
+        <input type="text" id="scaling-filter-agent" placeholder="Filter by agent…" style="width:180px;"/>
+        <span style="margin-left:auto;font-size:13px;color:#555;">
+          Page size:
+          <select id="scaling-page-size">
+            <option value="20" selected="selected">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </span>
+      </div>
+      <table class="sortable bigtable" style="width:100%;border:1px solid #ccc;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Agent</th>
+            <th>Direction</th>
+            <th>Executors</th>
+            <th>Reason</th>
+            <th>CPU Free %</th>
+            <th>Mem Free MB</th>
+          </tr>
+        </thead>
+        <tbody id="scaling-tbody">
+          <tr><td colspan="7">Loading…</td></tr>
+        </tbody>
+      </table>
+      <div class="qm-pager" id="scaling-pager">
+        <button id="scaling-prev">◀ Prev</button>
+        <span class="qm-page-info" id="scaling-page-info"></span>
+        <button id="scaling-next">Next ▶</button>
+      </div>
+
+      <p style="margin-top:24px;color:#888;font-size:12px;">
+        Refreshes every 30 s. Timestamps are UTC.
+        REST: <code>/queue-monitor/apiSnapshot</code>
+        · <code>/apiHistory</code>
+        · <code>/apiPickups</code>
+        · <code>/apiScaling</code>
+      </p>
+
+    </l:main-panel>
+  </l:layout>
+
+  <st:adjunct includes="io.jenkins.plugins.queuemonitor.dashboard"/>
+
+</j:jelly>
