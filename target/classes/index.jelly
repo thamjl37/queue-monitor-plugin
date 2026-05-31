@@ -1,0 +1,7 @@
+<?jelly escape-by-default='true'?>
+<div>
+  Monitors build queue depth, executor utilization, and build-duration anomalies
+  across labeled Jenkins agents. Provides intelligent agent selection,
+  dynamic label assignment, resource-aware executor scaling, and an
+  operational dashboard with REST API access.
+</div>

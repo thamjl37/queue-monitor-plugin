@@ -1,0 +1,20 @@
+Manifest-Version: 1.0
+Group-Id: io.jenkins.plugins
+Artifact-Id: queue-monitor
+Short-Name: queue-monitor
+Long-Name: Queue Depth Monitor
+Url: https://github.com/your-org/queue-monitor-plugin
+Plugin-Version: 2.0.0
+Hudson-Version: 2.541.2
+Jenkins-Version: 2.541.2
+Plugin-Developers: 
+Plugin-License-Name: MIT License
+Plugin-License-Url: https://opensource.org/licenses/MIT
+Plugin-ScmConnection: scm:git:https://github.com/jenkinsci/plugin-pom.gi
+ t/queue-monitor
+Plugin-ScmTag: plugin-4.88
+Plugin-ScmUrl: https://github.com/jenkinsci/plugin-pom/queue-monitor
+Libraries: C:\Coding\JenkinsPlugin\agenticplugin\src\main\resources,C:\C
+ oding\JenkinsPlugin\agenticplugin\target\classes
+Resource-Path: C:\Coding\JenkinsPlugin\agenticplugin\src\main\webapp
+

@@ -1,0 +1,17 @@
+io\jenkins\plugins\queuemonitor\GlobalConfig\doCheckMaxExecutorsPerAgent.stapler
+io\jenkins\plugins\queuemonitor\GlobalConfig.class
+io\jenkins\plugins\queuemonitor\PickupEvent.class
+META-INF\annotations\hudson.Extension.txt
+io\jenkins\plugins\queuemonitor\GlobalConfig\doCheckPollIntervalSeconds.stapler
+io\jenkins\plugins\queuemonitor\QueueSnapshot.class
+io\jenkins\plugins\queuemonitor\GlobalConfig\doCheckScalingMinFreeCpuPercent.stapler
+io\jenkins\plugins\queuemonitor\QueueMetricsCollector.class
+io\jenkins\plugins\queuemonitor\MetricsStore.class
+io\jenkins\plugins\queuemonitor\ScalingEvent.class
+io\jenkins\plugins\queuemonitor\AgentResourceInfo.class
+io\jenkins\plugins\queuemonitor\BuildPickupListener.class
+io\jenkins\plugins\queuemonitor\GlobalConfig\doCheckBuildDurationAnomalyFactor.stapler
+io\jenkins\plugins\queuemonitor\SchedulingEngine.class
+META-INF\annotations\hudson.Extension
+io\jenkins\plugins\queuemonitor\GlobalConfig\doCheckMinExecutorsPerAgent.stapler
+io\jenkins\plugins\queuemonitor\QueueMonitorAction.class
