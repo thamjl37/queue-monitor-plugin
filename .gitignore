@@ -1,6 +1,4 @@
 *.class
-*.hpi
-*.jar
 .idea/
 *.iml
 .settings/
