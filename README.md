@@ -67,12 +67,96 @@ Navigate to **Manage Jenkins → System → Queue Depth Monitor** to configure:
 
 ## Dashboard
 
-Once installed, a **Queue Monitor** link appears in the Jenkins sidebar. The dashboard provides:
+Once installed, a **Queue Monitor** link appears in the Jenkins sidebar. The dashboard auto-refreshes every 30 seconds and is divided into the following sections.
 
-- Current queue depth and executor utilization (with label breakdown)
-- Historical queue/utilization chart
-- Build pickup event log (job, agent, label, wait time)
-- Executor scaling audit log (direction, reason, CPU/memory readings)
+---
+
+### Summary Cards
+
+![Summary Cards](docs/screenshots/summary.png)
+
+The top of the dashboard displays three at-a-glance metrics:
+
+| Card | Description |
+|------|-------------|
+| **Total Queue Depth** | The current number of builds waiting across all labels |
+| **Executor Utilization** | Percentage of total executors that are actively running a build |
+| **Busy / Total Executors** | Raw count of busy executors vs. the total available across all agents |
+
+In the example above, 3 builds are queued, all 3 executors are busy (100% utilization), giving a 3/3 reading.
+
+---
+
+### Label Status
+
+![Label Status](docs/screenshots/label-status.png)
+
+A filterable, paginated table showing the current state of each agent label known to Jenkins.
+
+| Column | Description |
+|--------|-------------|
+| **Label** | The Jenkins agent label (e.g. `windows`, `main&&windows`) |
+| **Queue Depth** | Number of builds currently waiting for an executor with this label |
+| **Busy Executors** | Number of executors actively running builds under this label |
+| **Total Executors** | Total executors available for this label across all agents |
+| **Saturated?** | Highlighted **YES** (red) when every executor for the label is busy and builds are still queued — this triggers the auto-scaler |
+
+Rows are sorted with saturated labels first, then by descending queue depth, so the most critical labels are always visible at the top. Use the filter input and page-size selector to navigate large label sets.
+
+---
+
+### Queue Depth Trend
+
+![Queue Depth Trend](docs/screenshots/trend-chart.png)
+
+A canvas chart plotting the last 60 collected samples (up to the configured poll interval apart).
+
+| Line | Description |
+|------|-------------|
+| **Red — Queue depth** | Total number of queued builds at each sample point |
+| **Blue — Busy executors** | Number of executors actively running a build at each sample point |
+
+The chart makes it easy to spot queue spikes and correlate them with executor activity. A sudden red spike followed by a blue rise indicates the auto-scaler added executors to absorb the backlog.
+
+---
+
+### Recent Execution Pickups
+
+![Recent Execution Pickups](docs/screenshots/pickups.png)
+
+A filterable, paginated table of the most recent build-pickup events — one row per build that left the queue and started executing.
+
+| Column | Description |
+|--------|-------------|
+| **Time** | Timestamp when the build was picked up by an executor |
+| **Job** | Name of the Jenkins job that was executed |
+| **Agent** | The specific agent node that ran the build |
+| **Label** | The matched agent label used to route the build |
+| **Queue Wait** | How long the build waited in the queue before execution began (ms / s / min) |
+
+Records are displayed newest-first. Use the **Filter by job** and **Filter by label** inputs to narrow results. In the example above, `testing_job` is consistently routing to the `main&&windows` label while `Test` routes to `windows`, both picking up within single-digit milliseconds — indicating healthy executor availability at that point.
+
+---
+
+### Executor Scaling Audit
+
+![Executor Scaling Audit](docs/screenshots/scaling-audit.png)
+
+A filterable, paginated audit log of every executor scaling decision made by the plugin.
+
+| Column | Description |
+|--------|-------------|
+| **Time** | Timestamp of the scaling decision |
+| **Agent** | The agent node whose executor count was changed |
+| **Direction** | **Scale Up** (green) when executors were added; **Scale Down** (orange) when executors were reduced |
+| **Executors** | The transition, e.g. `2 → 3` for a scale-up or `3 → 2` for a scale-down |
+| **Reason** | Human-readable reason: `label saturation: <label>` for scale-up; `scale-down: queue empty` for scale-down |
+| **CPU Free %** | Percentage of CPU that was free on the agent at the time of the decision |
+| **Mem Free MB** | Free physical memory (MB) on the agent at the time of the decision |
+
+In the example above, the agent scaled down from 6 → 2 executors over four consecutive poll cycles (queue empty, cooldown respected), then scaled back up from 2 → 3 when the `main&&windows` label became saturated again. Scale-ups only occur when both CPU and memory headroom meet the configured thresholds.
+
+---
 
 ## REST API
 
