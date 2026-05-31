@@ -20,4 +20,6 @@ Plugin-ScmConnection: scm:git:https://github.com/jenkinsci/plugin-pom.gi
  t/queue-monitor
 Plugin-ScmTag: plugin-4.88
 Plugin-ScmUrl: https://github.com/jenkinsci/plugin-pom/queue-monitor
+Plugin-GitHash: ad2874cb7834a3d9bfc578ac596f3e65ae924ed9
+Implementation-Build: ad2874cb7834a3d9bfc578ac596f3e65ae924ed9
 
