@@ -2,6 +2,7 @@ package io.jenkins.plugins.queuemonitor;
 
 import hudson.Extension;
 import hudson.util.FormValidation;
+import hudson.util.Secret;
 import jenkins.model.GlobalConfiguration;
 import net.sf.json.JSONObject;
 import org.kohsuke.stapler.DataBoundSetter;
@@ -72,6 +73,28 @@ public class GlobalConfig extends GlobalConfiguration {
 
     /** Cooldown in seconds between successive scaling decisions on the same agent. */
     private int scalingCooldownSeconds = 300;
+
+    // -----------------------------------------------------------------------
+    // Build notification / webhook
+    // -----------------------------------------------------------------------
+
+    /** Send a JSON payload to an external endpoint after every build. */
+    private boolean notificationEnabled = false;
+
+    /** Full URL of the endpoint to POST build results to. */
+    private String notificationEndpointUrl = "";
+
+    /** Username for HTTP Basic authentication. */
+    private String notificationUsername = "";
+
+    /** Password for HTTP Basic authentication. */
+    private Secret notificationPasswordSecret = Secret.fromString("");
+
+    /** Bearer token for Authorization: Bearer … header. */
+    private Secret notificationBearerTokenSecret = Secret.fromString("");
+
+    /** Maximum lines of build log to include in the payload (0 = unlimited). */
+    private int notificationMaxLogLines = 5000;
 
     // -----------------------------------------------------------------------
     // Singleton accessor
@@ -206,6 +229,52 @@ public class GlobalConfig extends GlobalConfiguration {
     public FormValidation doCheckScalingMinFreeCpuPercent(@QueryParameter int value) {
         if (value < 5)  return FormValidation.error("Must be at least 5%.");
         if (value > 90) return FormValidation.error("Must be 90% or less.");
+        return FormValidation.ok();
+    }
+
+    // -----------------------------------------------------------------------
+    // Notification getters / setters
+    // -----------------------------------------------------------------------
+
+    public boolean isNotificationEnabled() { return notificationEnabled; }
+    @DataBoundSetter
+    public void setNotificationEnabled(boolean v) { this.notificationEnabled = v; }
+
+    public String getNotificationEndpointUrl() { return notificationEndpointUrl; }
+    @DataBoundSetter
+    public void setNotificationEndpointUrl(String v) {
+        this.notificationEndpointUrl = v != null ? v.trim() : "";
+    }
+
+    public String getNotificationUsername() { return notificationUsername; }
+    @DataBoundSetter
+    public void setNotificationUsername(String v) {
+        this.notificationUsername = v != null ? v : "";
+    }
+
+    public Secret getNotificationPasswordSecret() { return notificationPasswordSecret; }
+    @DataBoundSetter
+    public void setNotificationPasswordSecret(Secret v) {
+        this.notificationPasswordSecret = v != null ? v : Secret.fromString("");
+    }
+
+    public Secret getNotificationBearerTokenSecret() { return notificationBearerTokenSecret; }
+    @DataBoundSetter
+    public void setNotificationBearerTokenSecret(Secret v) {
+        this.notificationBearerTokenSecret = v != null ? v : Secret.fromString("");
+    }
+
+    public int getNotificationMaxLogLines() { return notificationMaxLogLines; }
+    @DataBoundSetter
+    public void setNotificationMaxLogLines(int v) {
+        this.notificationMaxLogLines = Math.max(0, v);
+    }
+
+    public FormValidation doCheckNotificationEndpointUrl(@QueryParameter String value) {
+        if (value == null || value.isBlank()) return FormValidation.ok();
+        if (!value.startsWith("http://") && !value.startsWith("https://")) {
+            return FormValidation.error("URL must start with http:// or https://");
+        }
         return FormValidation.ok();
     }
 

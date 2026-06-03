@@ -79,4 +79,39 @@
 
   </f:section>
 
+
+  <f:section title="Queue Depth Monitor - Build Notifications">
+
+    <f:entry title="Enable Build Notifications"
+             description="POST a JSON payload to the endpoint below after every build completes (success, failure, or abort).">
+      <f:checkbox field="notificationEnabled"/>
+    </f:entry>
+
+    <f:entry title="Endpoint URL"
+             description="Full URL that will receive the HTTP POST. Must start with http:// or https://.">
+      <f:textbox field="notificationEndpointUrl"/>
+    </f:entry>
+
+    <f:entry title="Username"
+             description="Username for HTTP Basic authentication. Fill in both Username and Password to use Basic auth. Leave blank to use Bearer Token instead.">
+      <f:textbox field="notificationUsername"/>
+    </f:entry>
+
+    <f:entry title="Password"
+             description="Password for HTTP Basic authentication. Stored encrypted.">
+      <f:password field="notificationPasswordSecret"/>
+    </f:entry>
+
+    <f:entry title="Bearer Token"
+             description="Token sent as 'Authorization: Bearer …'. Used only when Username is blank. Stored encrypted.">
+      <f:password field="notificationBearerTokenSecret"/>
+    </f:entry>
+
+    <f:entry title="Max Log Lines in Payload"
+             description="Maximum lines of build log to include. 0 means no limit (use with caution on large builds).">
+      <f:number field="notificationMaxLogLines" min="0" step="1000"/>
+    </f:entry>
+
+  </f:section>
+
 </j:jelly>

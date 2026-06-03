@@ -13,6 +13,7 @@ A Jenkins plugin that monitors build queue depth, executor utilization, build-du
 - **Scaling audit log** — keeps a full history of every scale-up and scale-down decision
 - **Live dashboard** — auto-refreshing UI at `/queue-monitor` with charts and audit tables
 - **REST API** — JSON endpoints for external tooling integration
+- **Build notifications** — POSTs a structured JSON payload to a configurable endpoint after every build completes, regardless of outcome (success, failure, abort)
 
 ## Requirements
 
@@ -28,7 +29,7 @@ A Jenkins plugin that monitors build queue depth, executor utilization, build-du
 mvn clean package -DskipTests
 ```
 
-The installable plugin artifact is produced at `target/queue-monitor-${project.version}.hpi`.
+The installable plugin artifact is produced at `target/queue-monitor-2.1.0.hpi`.
 
 To run tests:
 
@@ -46,7 +47,9 @@ mvn test
 
 ## Configuration
 
-Navigate to **Manage Jenkins → System → Queue Depth Monitor** to configure:
+Navigate to **Manage Jenkins → System → Queue Depth Monitor** to configure all settings. Settings are split into three groups.
+
+### General
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -57,6 +60,11 @@ Navigate to **Manage Jenkins → System → Queue Depth Monitor** to configure:
 | Baseline Sample Count | 10 | Minimum samples before anomaly detection activates |
 | Queue Depth Alert Threshold | 10 | Depth per label that triggers an alert (0 = disabled) |
 | Saturation Alert Poll Count | 3 | Consecutive saturated polls before alerting |
+
+### Executor Scaling
+
+| Setting | Default | Description |
+|---------|---------|-------------|
 | Dynamic Label Enabled | true | Enable dynamic label assignment recommendations |
 | Executor Scaling Enabled | true | Enable resource-aware executor scaling |
 | Max Executors Per Agent | 20 | Ceiling for auto-scaling |
@@ -64,6 +72,27 @@ Navigate to **Manage Jenkins → System → Queue Depth Monitor** to configure:
 | Scaling Min Free CPU % | 20 | Minimum free CPU before adding an executor |
 | Scaling Min Free Memory MB | 256 | Minimum free RAM before adding an executor |
 | Scaling Cooldown (seconds) | 300 | Minimum gap between scaling decisions on the same agent |
+
+### Build Notifications
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Enable Build Notifications | false | Activate the webhook; when disabled, no HTTP requests are made |
+| Endpoint URL | _(empty)_ | Full `http://` or `https://` URL to POST build results to |
+| Username | _(empty)_ | Username for HTTP Basic authentication |
+| Password | _(empty)_ | Password for HTTP Basic authentication; stored AES-encrypted |
+| Bearer Token | _(empty)_ | Token for `Authorization: Bearer …`; stored AES-encrypted |
+| Max Log Lines in Payload | 5000 | Maximum build-log lines included in the payload; 0 = no limit |
+
+Authentication is selected automatically based on what is filled in:
+
+| Credentials provided | Auth sent |
+|----------------------|-----------|
+| Username + Password | `Authorization: Basic base64(username:password)` |
+| Bearer Token only | `Authorization: Bearer <token>` |
+| Neither | No `Authorization` header |
+
+Fill in **either** Username/Password **or** Bearer Token — not both. If a Username is present, Basic auth always takes priority.
 
 ## Dashboard
 
@@ -158,6 +187,62 @@ In the example above, the agent scaled down from 6 → 2 executors over four con
 
 ---
 
+## Build Notifications
+
+When **Enable Build Notifications** is turned on, the plugin POSTs a JSON payload to the configured endpoint after **every** build completes — regardless of whether the result is `SUCCESS`, `FAILURE`, `UNSTABLE`, or `ABORTED`.
+
+### Payload format
+
+```json
+{
+  "jobName":     "my-pipeline",
+  "buildNumber": 42,
+  "jobUrl":      "https://jenkins.example.com/job/my-pipeline/42/",
+  "startTime":   "2026-06-01T10:00:00Z",
+  "endTime":     "2026-06-01T10:05:00Z",
+  "status":      "SUCCESS",
+  "log":         "Started by user …\n[Pipeline] Start of Pipeline\n…",
+  "agents": [
+    {
+      "slaveName": "linux-agent-1",
+      "label":     "linux",
+      "usedFrom":  "2026-06-01T10:00:01Z",
+      "usedUntil": "2026-06-01T10:05:02Z"
+    }
+  ]
+}
+```
+
+All timestamps are in ISO 8601 / UTC format.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `jobName` | string | Full name of the Jenkins job (folder-qualified if applicable) |
+| `buildNumber` | integer | Build number |
+| `jobUrl` | string | Absolute URL to the specific build page |
+| `startTime` | string (ISO 8601) | When the build started executing on an agent |
+| `endTime` | string (ISO 8601) | When the build execution finished |
+| `status` | string | Final build result: `SUCCESS`, `FAILURE`, `UNSTABLE`, `ABORTED`, or `UNKNOWN` |
+| `log` | string | Build log output, up to `Max Log Lines` lines, lines joined with `\n` |
+| `agents` | array | One entry per agent that ran this build (see below) |
+
+#### Agent entry fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `slaveName` | string | Node name of the agent (`built-in` for the Jenkins controller) |
+| `label` | string | Label expression used to route the build to this agent |
+| `usedFrom` | string (ISO 8601) | Timestamp when the agent started executing the build |
+| `usedUntil` | string (ISO 8601) | Timestamp when the agent finished executing the build |
+
+> **Pipeline multi-agent note:** the current implementation captures the primary executor that started the top-level build. Per-`node()` step tracking for complex pipelines with multiple agents requires the `workflow-cps` plugin as an additional dependency, which is not yet included.
+
+### HTTP contract
+
+The plugin sends an HTTP `POST` with `Content-Type: application/json; charset=UTF-8`. Authentication is applied automatically — Basic if a username is configured, Bearer if only a token is configured, or none. The plugin expects any `2xx` response to indicate success. Non-2xx responses are logged as warnings but do not affect the build result. The request times out after 10 s (connect) / 30 s (read).
+
+---
+
 ## REST API
 
 All endpoints require at least `Jenkins.READ` permission.
@@ -179,9 +264,19 @@ QueueMetricsCollector  (AsyncPeriodicWork)
     └─► SchedulingEngine    — evaluates queue; scales executors or recommends labels
 
 BuildPickupListener    (RunListener)
-    │  fires on job start and completion
-    ├─► records PickupEvent (agent, label, wait time)
-    └─► detects duration anomalies against per-job baseline
+    │  fires on job start, completion, and finalization
+    ├─► onStarted:    records PickupEvent (agent, label, wait time)
+    │                 captures AgentStart (agent name, label, timestamp) in ConcurrentHashMap
+    ├─► onCompleted:  detects duration anomalies against per-job baseline
+    │                 refreshes pipeline label hints
+    └─► onFinalized:  builds full payload (job details + agent usage + log)
+                      → BuildNotifier.send() — HTTP POST to configured endpoint
+
+BuildNotifier
+    │  stateless utility; reads GlobalConfig on every call
+    ├─► serialises payload to JSON (net.sf.json)
+    ├─► applies configured auth (NONE / API_KEY / BASIC / BEARER)
+    └─► fires HTTP POST via java.net.HttpURLConnection
 
 QueueMonitorAction     (RootAction @ /queue-monitor)
     ├─► serves the Jelly dashboard (index.jelly)
@@ -189,6 +284,7 @@ QueueMonitorAction     (RootAction @ /queue-monitor)
 
 GlobalConfig           (GlobalConfiguration @ Manage Jenkins → System)
     └─► all tuneable settings with safe defaults
+        includes notification endpoint, auth credentials (Secret), and log-line cap
 ```
 
 ## License

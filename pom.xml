@@ -13,7 +13,7 @@
 
   <groupId>io.jenkins.plugins</groupId>
   <artifactId>queue-monitor</artifactId>
-  <version>2.0.0</version>
+  <version>2.2.0</version>
   <packaging>hpi</packaging>
 
   <name>Queue Depth Monitor</name>
@@ -80,6 +80,16 @@
       <version>2.4</version>
       <classifier>jdk15</classifier>
       <scope>provided</scope>
+    </dependency>
+
+    <!-- Pipeline / workflow support for per-node-block agent tracking -->
+    <dependency>
+      <groupId>org.jenkins-ci.plugins.workflow</groupId>
+      <artifactId>workflow-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins.workflow</groupId>
+      <artifactId>workflow-support</artifactId>
     </dependency>
 
     <!-- Test dependencies -->

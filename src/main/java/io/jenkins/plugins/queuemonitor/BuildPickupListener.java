@@ -6,26 +6,58 @@ import hudson.model.Computer;
 import hudson.model.Executor;
 import hudson.model.Label;
 import hudson.model.Node;
+import hudson.model.Result;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.model.listeners.RunListener;
 import jenkins.model.Jenkins;
 
+import java.io.IOException;
 import java.time.Instant;
-import java.util.Set;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Listens for build starts to record execution pickup events.
+ * Listens for build lifecycle events to:
+ *   - Record execution pickup events (agent, label, queue wait time)
+ *   - Detect build-duration anomalies against a per-job baseline
+ *   - POST a JSON payload to the configured webhook endpoint after every build
  *
- * Also records build duration on completion for anomaly baseline building.
+ * Agent usage timing for pipeline builds is provided by AgentUsageTracker
+ * (GraphListener), which fires precise events at each node() block start/end.
+ * No log parsing is used for labels or timings.
  */
 @Extension
 public class BuildPickupListener extends RunListener<Run<?, ?>> {
 
     private static final Logger LOG = Logger.getLogger(BuildPickupListener.class.getName());
+
+    /**
+     * Tracks the primary executor's agent and start time for each in-progress build.
+     * Used as a fallback for non-pipeline (freestyle) builds that have no GraphListener data.
+     * Key = run.getExternalizableId()
+     */
+    private final Map<String, AgentStart> inProgressAgents = new ConcurrentHashMap<>();
+
+    private static final class AgentStart {
+        final String slaveName;
+        final String label;
+        final Instant usedFrom;
+        AgentStart(String slaveName, String label, Instant usedFrom) {
+            this.slaveName = slaveName;
+            this.label     = label;
+            this.usedFrom  = usedFrom;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // RunListener hooks
+    // -----------------------------------------------------------------------
 
     @Override
     public void onStarted(Run<?, ?> run, TaskListener listener) {
@@ -33,6 +65,11 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
             recordPickup(run);
         } catch (Exception e) {
             LOG.fine("[QueueMonitor] Could not record pickup: " + e.getMessage());
+        }
+        try {
+            trackAgentStart(run);
+        } catch (Exception e) {
+            LOG.fine("[QueueMonitor] Could not track agent start: " + e.getMessage());
         }
     }
 
@@ -49,10 +86,7 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
             LOG.fine("[QueueMonitor] Could not record duration: " + e.getMessage());
         }
 
-        // For WorkflowJob (pipeline) runs, the pickup label may have been recorded as
-        // "built-in" because sub-tasks didn't exist yet when onStarted fired.
-        // Now that the build is complete, all node() steps have run — refresh hints
-        // from running executors and update any unresolved pickup entries.
+        // Refresh pipeline label hints now that all node() steps have completed
         try {
             String jobName = run.getParent().getFullName();
             QueueMetricsCollector collector = QueueMetricsCollector.get();
@@ -63,7 +97,6 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
                 if (hint != null && !"built-in".equals(hint)) {
                     store.updatePickupLabel(jobName, hint);
                 }
-                // Write the pickup event to the JSONL file now that the label is final.
                 store.persistLatestPickup(jobName);
             }
         } catch (Exception e) {
@@ -71,23 +104,30 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
         }
     }
 
+    @Override
+    public void onFinalized(Run<?, ?> run) {
+        try {
+            sendBuildNotification(run);
+        } catch (Exception e) {
+            LOG.fine("[QueueMonitor] Could not send build notification: " + e.getMessage());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Pickup recording
     // -----------------------------------------------------------------------
 
     private void recordPickup(Run<?, ?> run) {
         Executor executor = run.getExecutor();
         if (executor == null) return;
 
-        Computer computer = executor.getOwner(); // getOwner() is @Nonnull per Executor API
+        Computer computer = executor.getOwner();
         Node node = computer.getNode();
         String agentName = node != null ? node.getNodeName() : "built-in";
         if (agentName.isEmpty()) agentName = "built-in";
 
-        // Determine matched label: find intersection of job label and agent labels
         String matchedLabel = resolveMatchedLabel(run, node);
 
-        // Queue wait = time from when the run was created (queued) to when it actually started.
-        // run.getTimeInMillis() is the scheduled/queued time for all Run types.
-        // run.getStartTimeInMillis() is when the executor actually began running it.
         long queueWaitMs = Math.max(0, run.getStartTimeInMillis() - run.getTimeInMillis());
 
         PickupEvent event = new PickupEvent(
@@ -105,16 +145,77 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
             event.jobName, agentName, matchedLabel, queueWaitMs));
     }
 
+    private void trackAgentStart(Run<?, ?> run) {
+        Executor executor = run.getExecutor();
+        if (executor == null) return;
+        Computer computer = executor.getOwner();
+        Node node = computer.getNode();
+        String agentName = (node != null && !node.getNodeName().isEmpty())
+            ? node.getNodeName() : "built-in";
+        String label = resolveMatchedLabel(run, node);
+        inProgressAgents.put(run.getExternalizableId(),
+            new AgentStart(agentName, label, Instant.ofEpochMilli(run.getStartTimeInMillis())));
+    }
+
+    // -----------------------------------------------------------------------
+    // Build notification
+    // -----------------------------------------------------------------------
+
+    private void sendBuildNotification(Run<?, ?> run) {
+        GlobalConfig cfg = GlobalConfig.get();
+        if (cfg == null || !cfg.isNotificationEnabled()) return;
+
+        AgentStart primary = inProgressAgents.remove(run.getExternalizableId());
+
+        long startMs    = run.getStartTimeInMillis();
+        long durationMs = run.getDuration();
+        Instant buildStart = Instant.ofEpochMilli(startMs);
+        Instant buildEnd   = durationMs > 0
+            ? Instant.ofEpochMilli(startMs + durationMs)
+            : Instant.now();
+
+        // Pipeline builds: per-block agent usage with precise timing from AgentUsageTracker
+        // (populated by GraphListener events, no log parsing)
+        List<SlaveUsageDetail> agents = Collections.emptyList();
+        AgentUsageTracker tracker = AgentUsageTracker.get();
+        if (tracker != null) {
+            agents = tracker.getAndRemoveUsage(run.getExternalizableId());
+        }
+
+        // Freestyle / non-pipeline fallback: single entry from onStarted
+        if (agents.isEmpty() && primary != null) {
+            agents = Collections.singletonList(
+                new SlaveUsageDetail(primary.slaveName, primary.label, primary.usedFrom, buildEnd));
+        }
+
+        String log = readLog(run, cfg.getNotificationMaxLogLines());
+
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        String rootUrl  = jenkins != null && jenkins.getRootUrl() != null ? jenkins.getRootUrl() : "";
+
+        Result result = run.getResult();
+        String status = result != null ? result.toString() : "UNKNOWN";
+
+        BuildNotifier.send(
+            run.getParent().getFullName(),
+            run.getNumber(),
+            rootUrl + run.getUrl(),
+            buildStart.toString(),
+            buildEnd.toString(),
+            status,
+            log,
+            agents
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
     private String resolveMatchedLabel(Run<?, ?> run, Node node) {
         String jobName = run.getParent().getFullName();
-
         try {
             QueueMetricsCollector collector = QueueMetricsCollector.get();
-
-            // Priority 1: label hint derived from pipeline sub-tasks.
-            // If the pre-populated hint is missing (e.g. first run after restart,
-            // or the parent job started before the 30s collector tick), do an
-            // immediate live scan of the queue AND running executors right now.
             if (collector != null) {
                 if (collector.getJobLabelHint(jobName) == null) {
                     liveRefreshHints(collector);
@@ -123,14 +224,11 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
                 if (hint != null) return hint;
             }
 
-            // Priority 2: label expression configured directly on the job (AbstractProject).
             if (run.getParent() instanceof AbstractProject) {
                 Label required = ((AbstractProject<?, ?>) run.getParent()).getAssignedLabel();
                 if (required != null) return required.getName();
             }
 
-            // Priority 3: Queue.Task.getAssignedLabel() — but only if it is not the
-            // node's own self-label (which pipelines always return for the built-in node).
             if (run.getParent() instanceof hudson.model.Queue.Task) {
                 try {
                     Label required = ((hudson.model.Queue.Task) run.getParent()).getAssignedLabel();
@@ -142,12 +240,10 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
                     }
                 } catch (Exception ignored) {}
             }
-
         } catch (Exception e) {
             LOG.fine("[QueueMonitor] resolveMatchedLabel error: " + e.getMessage());
         }
 
-        // Final fallback: node display name
         if (node == null) return "unknown";
         String name = node.getNodeName();
         return name.isEmpty() ? "built-in" : name;
@@ -156,7 +252,6 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
     private static final Pattern PART_OF_PATTERN =
         Pattern.compile("^part of (.+) #\\d+$");
 
-    /** Returns true if the label is a node self-label (e.g. "built-in") — not a real job constraint. */
     private static boolean isNodeSelfLabel(String labelName, Jenkins jenkins) {
         if ("built-in".equals(labelName)) return true;
         for (Node node : jenkins.getNodes()) {
@@ -165,16 +260,10 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
         return false;
     }
 
-    /**
-     * Scans the current queue AND all running executors for sub-task display names
-     * matching "part of <jobName> #<N>" and pushes the findings into the collector's
-     * hint map immediately — without waiting for the next 30s poll cycle.
-     */
     private void liveRefreshHints(QueueMetricsCollector collector) {
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         if (jenkins == null) return;
         try {
-            // Scan queued items
             for (hudson.model.Queue.Item item : jenkins.getQueue().getItems()) {
                 Label lbl = null;
                 try { lbl = item.task.getAssignedLabel(); } catch (Exception ignored) {}
@@ -186,7 +275,6 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
                         m.group(1), lbl.getName()));
                 }
             }
-            // Scan currently running executors — sub-tasks that already left the queue
             for (Computer computer : jenkins.getComputers()) {
                 for (Executor executor : computer.getExecutors()) {
                     if (executor.isIdle()) continue;
@@ -224,6 +312,17 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
                 "[QueueMonitor] ALERT: Build '%s #%d' took %.1f× baseline (%.1fs vs avg %.1fs). Possible Nexus delay.",
                 jobName, run.getNumber(),
                 factor, durationMs / 1000.0, baseline / 1000.0));
+        }
+    }
+
+    private static String readLog(Run<?, ?> run, int maxLines) {
+        try {
+            int limit = maxLines > 0 ? maxLines : Integer.MAX_VALUE;
+            List<String> lines = run.getLog(limit);
+            return String.join("\n", lines);
+        } catch (IOException e) {
+            LOG.fine("[QueueMonitor] Could not read build log: " + e.getMessage());
+            return "";
         }
     }
 }

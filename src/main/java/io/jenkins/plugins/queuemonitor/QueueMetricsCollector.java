@@ -253,6 +253,22 @@ public class QueueMetricsCollector extends hudson.model.AsyncPeriodicWork {
             }
         }
 
+        // Ensure every online agent appears in the table even when no jobs carry
+        // a label constraint (e.g. bare node{} pipelines). Self-labels are
+        // intentionally excluded from knownJobLabels, so we add them here as
+        // a fallback keyed by node name so the table is never completely empty.
+        for (Computer c : online) {
+            Node node = c.getNode();
+            if (node == null) continue;
+            String name = node.getNodeName().isEmpty() ? "built-in" : node.getNodeName();
+            if (!totalByLabel.containsKey(name)) {
+                List<Executor> execs = c.getExecutors();
+                totalByLabel.put(name, execs.size());
+                busyByLabel.put(name,
+                    (int) execs.stream().filter(e -> !e.isIdle()).count());
+            }
+        }
+
         QueueSnapshot snap = new QueueSnapshot(
             Instant.now(),
             items.length,
