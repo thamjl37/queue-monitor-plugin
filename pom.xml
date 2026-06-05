@@ -13,7 +13,7 @@
 
   <groupId>io.jenkins.plugins</groupId>
   <artifactId>queue-monitor</artifactId>
-  <version>2.2.0</version>
+  <version>3.0.0</version>
   <packaging>hpi</packaging>
 
   <name>Queue Depth Monitor</name>

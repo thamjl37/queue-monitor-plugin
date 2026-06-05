@@ -142,6 +142,9 @@ public class SchedulingEngine {
         int floor = cfg.getMinExecutorsPerAgent();
 
         for (AgentResourceInfo info : agents) {
+            // Never scale the built-in controller
+            if ("built-in".equals(info.nodeName)) continue;
+
             // Never reduce below the floor
             if (info.currentExecutors <= floor) continue;
 
@@ -254,6 +257,9 @@ public class SchedulingEngine {
         List<AgentResourceInfo> candidates = compatible.isEmpty() ? allAgents : compatible;
 
         for (AgentResourceInfo info : candidates) {
+            // Never scale the built-in controller
+            if ("built-in".equals(info.nodeName)) continue;
+
             if (isOnCooldown(info.nodeName, cfg)) {
                 LOG.info(String.format("[QueueMonitor] Scaling skip '%s': on cooldown", info.nodeName));
                 continue;
