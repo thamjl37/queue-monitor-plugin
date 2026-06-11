@@ -1,97 +1,150 @@
-# Queue Depth Monitor — Test Jobs
+# Queue Depth Monitor — Test Suite (UAT)
 
-Jenkins pipeline jobs and helper scripts for exercising every feature of the
-Queue Depth Monitor plugin on a live Jenkins instance. This complements the
-narrative plan in [`../TEST_CASES.txt`](../TEST_CASES.txt) with ready-to-paste
-job scripts, organized **one driver per feature**.
-
-## Folder layout
+A **single parameterized pipeline script** that exercises every feature of the
+Queue Depth Monitor plugin on the UAT Jenkins instance, including a PROD-scale
+load simulation. It replaces the previous seven per-feature groovy jobs and the
+external `rest-check` / `webhook-listener` scripts — all REST calls and
+verification now run inside the pipeline itself via `sh` / `bat` / `powershell`
+steps on the Jenkins agents.
 
 ```
 test/
-├── README.md                         ← this file (feature → job map)
-├── pipelines/
-│   ├── 01-bulk-parallel.groovy           queue depth, utilization, label status,
-│   │                                       saturation, trend, scaling audit
-│   ├── 02-bulk-independent-builds.groovy  build pickup tracking (Pickups table)
-│   ├── 03-duration-anomaly.groovy         build-duration anomaly detection
-│   ├── 04-multi-label.groovy              multi-label separation + summary aggregation
-│   ├── 05-scaling-saturation.groovy       auto-scaling + scaling audit + dynamic labels
-│   ├── 06-stress-volume.groovy            trend accumulation, ring buffer, UI under load
-│   └── 07-notification-matrix.groovy      build-notification webhook (all outcomes)
-└── scripts/
-    ├── rest-check.ps1 / rest-check.sh     hit all 4 REST endpoints, diff vs UI
-    └── webhook-listener.ps1               local HTTP listener to inspect webhook POSTs
+├── README.md                              ← this file
+└── pipelines/
+    └── queue-monitor-suite.groovy         ← the ONE script (suite + worker mode)
 ```
 
-## One-time environment setup
+## Target environment (UAT)
 
-1. **Install** `target/queue-monitor-3.0.0.hpi` → *Manage Jenkins → Plugins →
-   Advanced → Deploy Plugin* → restart.
-2. **Agents/labels** — minimum: label the built-in node `linux` with ~4
-   executors (covers everything **except** scaling). Recommended: add 1–2
-   inbound agents labelled `linux` / `windows` (e.g. 4 and 2 executors) to also
-   exercise auto-scaling. *The built-in node never scales and self-labels are
-   excluded from Label Status — always test scaling against a non-`built-in` label.*
-3. **Tuning** — *Manage Jenkins → System → Queue Depth Monitor*:
-   - Poll Interval → **10s** (minimum; samples transient states quickly)
-   - Executor Scaling Enabled → **true**; Max Executors Per Agent → **8**;
-     Scaling Cooldown → **30s**
-   - Build Notifications **OFF** until you run job 07.
-4. **Timing rules that make or break a test:**
-   - Each branch must sleep **≥ 2 poll cycles** (≥ 30s at 10s polling; use 90–120s).
-   - Fan-out must **exceed total executors** for the label, or queue depth and
-     saturation never appear.
+| Node | Label | Notes |
+|------|-------|-------|
+| Controller | `built-in controller` (UI) | Jenkins treats this as two labels; the suite uses `built-in`, which always matches the controller. Needs ≥ 1 executor for the stress monitor. |
+| Linux agent | `linux` | e.g. 4 executors |
+| Windows agent | `windows` | e.g. 2 executors; needs `curl` (stock on Win10/Server 2019+) |
+| Dashboard app | `http://devopsdashboard.com` (10.100.200.100) | Configure as the plugin's **Build Notification Endpoint URL**. Every worker build the suite launches POSTs its payload there, so Jenkins load is automatically duplicated onto the dashboard. |
 
-## Feature → test-job map
+## One-time setup
 
-| # | Plugin feature | Driver job / script | Expected signal |
-|---|----------------|---------------------|-----------------|
-| 1 | **Queue depth monitoring** | `01-bulk-parallel` (FANOUT≫execs) | Summary *Total Queue Depth* ≈ FANOUT − totalExec; Label Status *Queue Depth* per label |
-| 2 | **Executor utilization** | `01-bulk-parallel` | Summary *Utilization* 100%, *Busy/Total* = execs/execs |
-| 3 | **Label Status table** | `01-bulk-parallel`, `04-multi-label` | one row per label with queue/busy/total |
-| 4 | **Saturation detection & sorting** | `01-bulk-parallel` | *Saturated?* = **YES** (red), saturated row sorted to top; System Log ALERT after *Saturation Alert Poll Count* polls |
-| 5 | **Queue Depth Trend chart** | `06-stress-volume` (or any sustained load) | red (queue) + blue (busy) lines accumulate; `apiHistory?limit=60` grows |
-| 6 | **Multi-label separation** | `04-multi-label` (or two copies of job 01) | two distinct Label Status rows; Summary aggregates both |
-| 7 | **Build pickup tracking** | `02-bulk-independent-builds` | ~COUNT newest-first rows: Job/Agent/Label/Queue Wait; later builds wait longer |
-| 8 | **Build duration anomaly detection** | `03-duration-anomaly` | after baseline seeded, spike run logs `ALERT: Build … took N× baseline` |
-| 9 | **Executor auto-scaling** | `05-scaling-saturation` | executor count physically changes on the agent (verify in agent config) |
-| 10 | **Scaling audit log** | `05-scaling-saturation` | Scale Up `4→5…` reason `label saturation: <label>`; Scale Down reason `scale-down: queue empty`; CPU%/Mem columns filled |
-| 11 | **Dynamic label recommendations** | `05-scaling-saturation` (scaling disabled / at ceiling) | recommendation logged when scale-up is not possible |
-| 12 | **Live dashboard** | any load + browse `/queue-monitor` | sections render, auto-refresh, filters + pagination work, no UI errors (`06-stress-volume` for scale) |
-| 13 | **REST API** | `scripts/rest-check.*` | `apiSnapshot` / `apiHistory` / `apiPickups` / `apiScaling` return JSON matching the UI 1:1 |
-| 14 | **Build notifications** | `07-notification-matrix` + `scripts/webhook-listener.ps1` | POST per build for SUCCESS/FAILURE/UNSTABLE/ABORTED; correct auth header + payload fields |
+1. **Install the plugin** (`target/queue-monitor-*.hpi`) and restart.
+2. **Plugin tuning** — *Manage Jenkins → System → Queue Depth Monitor*:
+   - Poll Interval = **10** (and keep the suite's `POLL_INTERVAL` parameter in sync)
+   - Executor Scaling Enabled = **true**, Max Executors Per Agent **>** current count,
+     Scaling Cooldown = **30**
+   - Build Notifications = **enabled**, Endpoint URL = the dashboard ingest URL
+     (`http://devopsdashboard.com/...`), auth as required by the dashboard
+3. **Create two Pipeline jobs, both with this same script pasted in:**
+   - `queue-monitor-suite` — the orchestrator you run
+   - `queue-monitor-worker` — launched by the suite as independent builds
+     (pickups, anomaly baselines, notifications and stress volume all fire once
+     per *build*, not per parallel branch, so a second job is required).
+     `MODE=auto` detects "worker" in the job name — no per-job edits needed.
+   - Run each job once after creation: it exits `NOT_BUILT` and registers the
+     parameters. From then on use **Build with Parameters**.
+   - Leave "Do not allow concurrent builds" **unchecked** on the worker job.
+4. **REST credentials** — create a Username+Password credential holding a
+   Jenkins user + API token and put its ID in the `CREDENTIALS_ID` parameter
+   (leave blank only if anonymous users have READ).
 
-## Suggested run order (fastest path to full coverage)
+## Selecting what to test
 
-1. `scripts/rest-check.*` on a fresh install → **TC1** (plugin loads, REST reachable, zeros).
-2. `01-bulk-parallel` FANOUT=30 SLEEP=120 LABEL=linux → features **1–4**; keep it running.
-3. While #2 runs: `scripts/rest-check.*` again → **REST↔UI consistency (feature 13/TC7)**.
-4. `06-stress-volume` (or just let #2 run 3–5 min) → **trend chart (feature 5)**.
-5. `04-multi-label` (needs a 2nd label) → **multi-label separation (feature 6)**.
-6. `02-bulk-independent-builds` (needs `sleeper-freestyle`) → **pickups (feature 7)**.
-7. `03-duration-anomaly`: seed baseline ≥10 runs at SLEEP=5, then one SLEEP=30 → **anomaly (feature 8)**.
-8. `05-scaling-saturation` against a real agent → **scaling + audit + dynamic labels (features 9–11)**.
-9. Start `scripts/webhook-listener.ps1`, enable notifications, run `07-notification-matrix` once per RESULT → **notifications (feature 14)**.
+`TESTS` is a comma-separated list (or `all`). Tests always execute in a fixed
+safe order (`rest → anomaly → queue → pickups → scaling → notify → stress`).
+
+| Token | Plugin features covered | Verification |
+|-------|------------------------|--------------|
+| `rest` | REST API (all 4 endpoints), reachability + response time **from both agents** | automatic (HTTP 200 asserted; latency logged) |
+| `anomaly` | Build-duration anomaly detection | seeds baseline + spike automatically; **manual**: check System Log for the `ALERT … x baseline` line |
+| `queue` | Queue depth, executor utilization, Label Status, **saturation**, trend chart, **multi-label separation** (both labels loaded at once) | automatic (asserts `totalQueueDepth > 0`, both labels present, saturation flagged, history growing — via REST, sampled *during* the load) |
+| `pickups` | Build pickup tracking (Recent Execution Pickups) | automatic (asserts ≥ `PICKUP_COUNT` rows for the worker job in `apiPickups`) |
+| `scaling` | Executor auto-scaling, scaling audit log, dynamic label recommendations | automatic (asserts Scale Up rows; warns if Scale Down pending) + **manual**: confirm the agent's executor count physically changed |
+| `notify` | Build notifications for SUCCESS / FAILURE / UNSTABLE / ABORTED | **manual**: confirm 4 payloads arrived on the dashboard with correct fields/auth |
+| `stress` | PROD-scale load: controller stability, ring buffer, dashboard load duplication | automatic (controller REST latency budget + error count) + **manual**: UI responsiveness, `Max Snapshots` cap, dashboard received the webhook volume |
+
+The suite prints a `TEST SUMMARY` (PASS / FAIL / MANUAL per test) and goes
+`UNSTABLE` if anything failed.
+
+## Recipes
+
+| Goal | Parameters |
+|------|-----------|
+| Smoke test after install | `TESTS=rest` |
+| Full functional UAT pass (default) | `TESTS=rest,queue,pickups,anomaly,scaling,notify` |
+| PROD-scale load test | `TESTS=stress` (see sizing below) |
+| Everything | `TESTS=all` |
+| Single feature | e.g. `TESTS=scaling` |
+
+## PROD-scale simulation on 2 agents
+
+PROD runs **50–100 jobs in parallel on 50–100 agents**. The controller-side
+cost of that is (a) scheduling/queue pressure and (b) 50–100 concurrent
+*running* builds — and sleep-based test load is nearly free on an agent, so
+2 UAT machines can emulate it:
+
+- **Raise executor counts**: temporarily set each UAT agent to 25–50 executors,
+  **or** set *Max Executors Per Agent* = 50 and let the plugin's auto-scaler
+  raise them under saturation (which stress-tests scaling at PROD volume too).
+- With default executors (4+2) the same total work still passes through
+  Jenkins — the wave just runs longer as a soak test.
+
+During each stress wave the suite runs three parallel tracks:
+
+1. **independent-builds** — `STRESS_JOBS` (default 60, PROD range 50–100)
+   worker builds alternating linux/windows; each also POSTs a
+   `WORKER_LOG_LINES`-sized payload to the dashboard.
+2. **queue-pressure** — `STRESS_FANOUT` extra `node()` branches keeping the
+   queue deep across both labels.
+3. **controller-monitor** — on the controller (`built-in`): every 15 s it
+   measures `apiSnapshot` + core API response times and logs controller
+   CPU/RAM. The stress test **fails** if any sample errors out or exceeds
+   `LATENCY_BUDGET_MS` (default 3000 ms) — that is the "Jenkins does not hang
+   or slow down" assertion. The load never targets the controller, so the
+   monitor always has an executor.
+
+Repeat with `STRESS_WAVES=2..3` for a sustained soak. Rough wave duration ≈
+`(STRESS_JOBS×STRESS_JOB_SECONDS + STRESS_FANOUT×STRESS_HOLD) ÷ total executors`.
+
+## Key parameters
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `TESTS` | `rest,queue,pickups,anomaly,scaling,notify` | which features to run |
+| `LINUX_LABEL` / `WINDOWS_LABEL` / `MASTER_LABEL` | `linux` / `windows` / `built-in` | UAT topology |
+| `WORKER_JOB` | `queue-monitor-worker` | name of the second job |
+| `CREDENTIALS_ID` | _(blank)_ | Jenkins API-token credential for REST checks |
+| `POLL_INTERVAL` | `10` | must match the plugin's configured poll interval |
+| `QUEUE_FANOUT` / `QUEUE_HOLD` | `12` / `120` | per-label branches / hold seconds |
+| `PICKUP_COUNT` | `20` | independent builds for the pickups table |
+| `BASELINE_RUNS` / `BASELINE_SECONDS` / `ANOMALY_SECONDS` | `10` / `5` / `30` | anomaly seeding + spike |
+| `SCALE_LABEL` / `SCALE_FANOUT` / `SCALE_HOLD` / `DRAIN_WAIT` | `linux` / `16` / `180` / `120` | scaling phases |
+| `STRESS_JOBS` / `STRESS_FANOUT` / `STRESS_WAVES` | `60` / `60` / `1` | PROD-scale volume |
+| `LATENCY_BUDGET_MS` | `3000` | controller responsiveness pass/fail threshold |
+| `WORKER_LOG_LINES` | `200` | log lines per worker build → webhook payload size |
 
 ## Ground-truth cross-checks
 
 - **Build Executor Status** widget = real busy/idle → compare to plugin Busy/Total.
 - **Build Queue** widget = real queued items → compare to Total Queue Depth.
-- `apiSnapshot` JSON should match the Summary cards 1:1 at the same instant.
-- For scaling, open the **agent config** to confirm the executor count physically
-  changed — not just logged.
+- `apiSnapshot` JSON must match the Summary cards 1:1 at the same instant
+  (the `queue` test asserts the REST side automatically).
+- For scaling, open the **agent config** to confirm the executor count
+  physically changed — not just logged.
 
-## Gotchas (so you don't misread pass/fail)
+## Gotchas
 
-1. Parallel builds produce **one** Pickups row per pipeline build, not one per
-   branch — by design. Use job 02 for pickup volume.
-2. Parallel pickup queue-wait ≈ 0 (the flyweight starts instantly); the
-   interesting per-branch waits do not generate PickupEvents.
-3. The scaling resource gate reads the **controller's** CPU/RAM, not the agent's.
-   If scale-up won't fire, lower *Scaling Min Free CPU %*.
-4. The built-in node never scales; self-labels are excluded from Label Status.
-5. First-run labels may briefly show `built-in` before the job→label hint
-   resolves; `onCompleted` corrects it retroactively.
-6. If branches finish inside one poll interval the collector may never sample the
-   queued state — keep sleeps long.
+1. Parallel branches produce **one** Pickups row per pipeline build, not one per
+   branch — that's why the worker job exists. Not a bug.
+2. Run `anomaly` **before** `pickups`/`stress` (the suite's fixed order does
+   this): later 45–60 s worker builds will themselves be flagged as anomalies
+   against the 5 s baseline — extra ALERT lines in the System Log are expected.
+3. The scaling resource gate reads the **controller's** CPU/RAM, not the
+   agent's. If scale-up won't fire, lower *Scaling Min Free CPU %*.
+4. The built-in node never scales and self-labels are excluded from Label
+   Status — `SCALE_LABEL` must be a real agent label.
+5. Keep holds ≥ 3 poll cycles (the suite auto-bumps `QUEUE_HOLD` if too short)
+   or the collector may never sample the queued state.
+6. If the suite and worker jobs live inside a folder, set `WORKER_JOB` to the
+   full path (e.g. `folder/queue-monitor-worker`) so the pickups assertion can
+   match the job name in `apiPickups`.
+7. A forced `ABORTED` result is set programmatically; for a belt-and-braces
+   check of real user aborts, cancel a long worker build in the UI once and
+   confirm the dashboard still receives `status=ABORTED`.
