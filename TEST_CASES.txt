@@ -1,0 +1,256 @@
+==============================================================================
+QUEUE DEPTH MONITOR PLUGIN - TEST PLAN
+Priority: Validate on the Jenkins UI that the plugin collects data from
+          bulk parallel Jenkins jobs.
+==============================================================================
+
+------------------------------------------------------------------------------
+KEY THING TO UNDERSTAND FIRST (so you read results correctly)
+------------------------------------------------------------------------------
+A pipeline's parallel { node('x'){...} } branches are NOT separate Jenkins
+"Run"s. They appear as queue/executor PLACEHOLDER SUB-TASKS whose display name
+is "part of <job> #<N>" - which is exactly the pattern the collector keys on
+(regex: ^part of (.+) #\d+$).
+
+Therefore:
+  * Bulk parallel node() blocks strongly drive:
+      - Summary cards
+      - Label Status table
+      - Queue Depth Trend chart
+      - Saturation detection
+      - Executor Scaling Audit
+  * The "Recent Execution Pickups" table fires once PER PIPELINE BUILD
+    (RunListener.onStarted), NOT once per branch. To fill the Pickups table
+    with volume, run many INDEPENDENT builds (Generator 2), not one big
+    parallel build.
+
+
+==============================================================================
+A. ENVIRONMENT & TEST CONFIG
+==============================================================================
+Jenkins: 2.541.2+ on Java 21.
+Install: target/queue-monitor-3.0.0.hpi
+  Manage Jenkins -> Plugins -> Advanced -> Deploy Plugin -> restart.
+
+Agents / labels - pick one:
+  * MINIMAL (single machine): label the built-in node "linux", give it ~4
+    executors. Covers everything EXCEPT scaling (engine never scales built-in).
+  * RECOMMENDED: add 1-2 inbound agents labelled "linux" / "windows" with
+    small executor counts (e.g. 4 and 2). Enables ALL tests incl. scaling.
+
+Tuning (Manage Jenkins -> System -> Queue Depth Monitor):
+  * Poll Interval -> 10s (minimum) so transient queue states get sampled and
+    the trend chart accumulates points quickly.
+  * Keep Executor Scaling Enabled = true for TC8.
+  * Set Max Executors Per Agent above the starting count (e.g. 8) so scale-up
+    has headroom.
+  * Set Scaling Cooldown -> 30 so you don't wait 5 min between scale events.
+  * Leave Build Notifications OFF until TC12.
+
+KEY TIMING RULES:
+  * Each branch must sleep long enough to span >=2 poll cycles
+    (>=30s at 10s polling; use 90-120s).
+  * Fan-out MUST exceed total executors for the label, or you will never see
+    queue depth or saturation.
+
+
+==============================================================================
+B. LOAD GENERATORS
+==============================================================================
+
+GENERATOR 1 - BULK PARALLEL PIPELINE
+(drives Label Status / Summary / Trend / Saturation / Scaling)
+Create a Pipeline job named "bulk-parallel" with this script:
+
+    properties([parameters([
+      string(name: 'FANOUT', defaultValue: '30'),
+      string(name: 'SLEEP',  defaultValue: '120'),
+      string(name: 'LABEL',  defaultValue: 'linux')
+    ])])
+
+    def n = params.FANOUT.toInteger()
+    def branches = [:]
+    for (int i = 0; i < n; i++) {
+      def idx = i
+      branches["b-${idx}"] = {
+        node(params.LABEL) {
+          echo "branch ${idx} on ${env.NODE_NAME}"
+          sleep params.SLEEP.toInteger()
+        }
+      }
+    }
+    parallel branches
+
+
+GENERATOR 2 - BULK INDEPENDENT BUILDS
+(drives the Pickups table volume)
+First create a freestyle job "sleeper-freestyle":
+  - Restrict where it runs -> label: linux
+  - Build step: sleep 60   (shell/batch)
+Then run this fan-out pipeline to launch 20 independent builds:
+
+    def jobs = [:]
+    for (int i = 0; i < 20; i++) {
+      def k = i
+      jobs["t${k}"] = { build job: 'sleeper-freestyle', wait: true }
+    }
+    parallel jobs
+
+
+==============================================================================
+C. TEST CASES (priority order)
+==============================================================================
+
+------------------------------------------------------------------------------
+TC1 - Plugin loads, dashboard + REST reachable
+------------------------------------------------------------------------------
+Setup:    Fresh install, no load.
+Action:   Open dashboard; GET /queue-monitor/apiSnapshot.
+Expected: "Queue Monitor" link in sidebar; dashboard renders with zeros;
+          apiSnapshot returns JSON.
+Verify:   --
+
+------------------------------------------------------------------------------
+TC2 *** CORE: collect data from bulk parallel ***
+------------------------------------------------------------------------------
+Setup:    4-executor "linux" agent.
+Action:   Run bulk-parallel  FANOUT=30  SLEEP=120  LABEL=linux.
+Expected: Summary -> Total Queue Depth ~= 26, Busy/Total = 4/4,
+          Utilization 100%.
+          Label Status row "linux": queue ~26, busy 4, total 4.
+Verify:   Compare to Jenkins "Build Queue" + "Build Executor Status" widgets.
+
+------------------------------------------------------------------------------
+TC3 *** Saturation detection & sorting ***
+------------------------------------------------------------------------------
+Setup:    Same as TC2 (fan-out >> executors).
+Action:   Observe Label Status during load.
+Expected: Label Status shows Saturated? = YES (red) for "linux";
+          saturated row sorted to the top.
+Verify:   Saturation log alert appears after N polls
+          (Saturation Alert Poll Count). Check Jenkins System Log.
+
+------------------------------------------------------------------------------
+TC4 - Trend chart accumulates over time
+------------------------------------------------------------------------------
+Setup:    TC2 load.
+Action:   Keep load running 3-5 minutes.
+Expected: Trend chart plots rising red (queue) then blue (busy) lines with
+          multiple sample points.
+Verify:   GET /queue-monitor/apiHistory?limit=60 array grows.
+
+------------------------------------------------------------------------------
+TC5 - Multi-label separation
+------------------------------------------------------------------------------
+Setup:    Two labels available (linux + windows).
+Action:   Run bulk-parallel LABEL=linux AND a second copy LABEL=windows
+          concurrently.
+Expected: Two distinct Label Status rows, each with its own queue/busy/total;
+          summary aggregates both.
+Verify:   Per-node executor status.
+
+------------------------------------------------------------------------------
+TC6 - Pickups table volume & fields
+------------------------------------------------------------------------------
+Setup:    sleeper-freestyle job exists.
+Action:   Run Generator 2 (20 independent builds).
+Expected: Recent Execution Pickups shows ~20 rows, newest-first, with
+          Job / Agent / Label / Queue Wait; later builds show larger wait.
+Verify:   GET /queue-monitor/apiPickups; filters by job/label work.
+
+------------------------------------------------------------------------------
+TC7 - REST <-> UI consistency under load
+------------------------------------------------------------------------------
+Setup:    TC2 load running.
+Action:   Hit all 4 endpoints:
+            /apiSnapshot  /apiHistory  /apiPickups  /apiScaling
+Expected: apiSnapshot numbers match Summary cards exactly; apiScaling /
+          apiPickups match the tables.
+Verify:   Manual diff.
+
+------------------------------------------------------------------------------
+TC8 - Scaling audit (needs a REAL agent + scaling enabled)
+------------------------------------------------------------------------------
+Setup:    Non-built-in agent, Executor Scaling Enabled, Max Executors > start,
+          Cooldown 30s.
+Action:   Saturate the agent (TC2 against it); then let the queue drain.
+Expected: Scaling Audit rows -> Scale Up "4->5..." reason
+          "label saturation: linux". After drain -> Scale Down rows,
+          reason "scale-down: queue empty".
+Verify:   Open the agent's config and confirm executor count physically
+          changed (not just logged).
+NOTE:     Scaling resource gate reads the CONTROLLER's CPU/RAM, not the
+          agent's. If scale-up does not fire, the controller's load may be
+          failing the threshold - check Scaling Min Free CPU %.
+
+------------------------------------------------------------------------------
+TC9 - Data accuracy reconciliation
+------------------------------------------------------------------------------
+Setup:    Any loaded state.
+Action:   Compare plugin numbers to Jenkins built-in widgets.
+Expected: Plugin Busy == actual busy executors;
+          Queue Depth == actual queued items.
+Verify:   Built-in widgets are the ground truth.
+
+------------------------------------------------------------------------------
+TC10 - Bulk / stress volume
+------------------------------------------------------------------------------
+Setup:    As available.
+Action:   Run bulk-parallel FANOUT=150 SLEEP=180.
+Expected: No UI errors; tables paginate/filter; queue depth ~
+          (150 - totalExec); dashboard stays responsive.
+Verify:   Ring-buffer cap respected (Max Snapshots setting).
+
+------------------------------------------------------------------------------
+TC11 - Duration anomaly (secondary)
+------------------------------------------------------------------------------
+Setup:    --
+Action:   Run a quick job >=10 times to set a baseline, then one slow run
+          (add extra sleep).
+Expected: Jenkins log: "ALERT: Build ... took N x baseline".
+Verify:   Jenkins -> Manage Jenkins -> System Log.
+
+------------------------------------------------------------------------------
+TC12 - Build notification webhook (secondary)
+------------------------------------------------------------------------------
+Setup:    Point Endpoint URL at webhook.site or a local HTTP listener;
+          enable Build Notifications.
+Action:   Run any builds.
+Expected: POST received with jobName / status / agents[] / log; auth header
+          matches configured Basic/Bearer/none.
+Verify:   Inspect received payload.
+
+
+==============================================================================
+D. VERIFICATION CROSS-CHECKS (your ground truth)
+==============================================================================
+  * Build Executor Status (left sidebar) = real busy/idle executors
+        -> compare to plugin Busy/Total.
+  * Build Queue widget = real queued items
+        -> compare to Total Queue Depth.
+  * /queue-monitor/apiSnapshot JSON should match Summary cards 1:1 at the
+    same instant.
+  * For TC8, open the agent config to confirm executor count physically
+    changed (not just logged).
+
+
+==============================================================================
+E. GOTCHAS (so you don't misread a pass/fail)
+==============================================================================
+1. Pickups table will NOT show per-branch rows for parallel builds - by design
+   (one Run per pipeline). Use Generator 2 for pickup volume. NOT a bug.
+2. Parallel pickup queue-wait ~= 0 - the pipeline flyweight starts instantly;
+   the interesting per-branch waits do NOT generate PickupEvents.
+3. Scaling resource gate reads the CONTROLLER's CPU/RAM, not the agent's
+   (ManagementFactory.getOperatingSystemMXBean() in SchedulingEngine). If
+   scale-up doesn't fire, it may be controller load failing the threshold.
+4. Built-in node NEVER scales, and self-labels are excluded from Label Status
+   - always test with a non-"built-in" label.
+5. First-run labels may briefly show "built-in" before the job->label hint
+   resolves; onCompleted retroactively corrects it.
+6. Set sleep long enough - if branches finish inside one poll interval the
+   collector may never sample the queued state.
+
+==============================================================================
+END OF TEST PLAN
+==============================================================================
