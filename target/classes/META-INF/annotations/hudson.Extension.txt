@@ -1,7 +1,9 @@
 # informational; use java -jar sezpoz.jar to see authoritative contents
+io.jenkins.plugins.queuemonitor.AgentUsageTracker
 io.jenkins.plugins.queuemonitor.BuildPickupListener
 io.jenkins.plugins.queuemonitor.GlobalConfig
 io.jenkins.plugins.queuemonitor.MetricsStore
 io.jenkins.plugins.queuemonitor.QueueMetricsCollector
 io.jenkins.plugins.queuemonitor.QueueMonitorAction
+io.jenkins.plugins.queuemonitor.QueueTrendMonitor
 io.jenkins.plugins.queuemonitor.SchedulingEngine

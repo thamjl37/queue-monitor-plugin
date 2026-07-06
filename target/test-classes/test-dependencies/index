@@ -1,0 +1,14 @@
+asm-api
+caffeine-api
+jakarta-activation-api
+jakarta-mail-api
+instance-identity
+workflow-api
+workflow-step-api
+workflow-support
+bouncycastle-api
+display-url-api
+mailer
+scm-api
+script-security
+structs

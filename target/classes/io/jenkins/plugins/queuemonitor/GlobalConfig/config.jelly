@@ -8,34 +8,9 @@
       <f:number field="pollIntervalSeconds" min="10" step="5"/>
     </f:entry>
 
-    <f:entry title="Data Retention (hours)"
-             description="How many hours of snapshot history to keep in memory.">
-      <f:number field="retentionHours" min="1" step="1"/>
-    </f:entry>
-
     <f:entry title="Max Snapshots"
              description="Hard cap on in-memory snapshots regardless of retention. Protects heap.">
       <f:number field="maxSnapshots" min="100" step="100"/>
-    </f:entry>
-
-    <f:entry title="Build Duration Anomaly Factor"
-             description="Flagged when duration exceeds baseline multiplied by this factor. E.g. 1.5 means 50% above average.">
-      <f:textbox field="buildDurationAnomalyFactor"/>
-    </f:entry>
-
-    <f:entry title="Baseline Sample Count"
-             description="Minimum completed builds before anomaly detection activates for a job.">
-      <f:number field="baselineSampleCount" min="3" step="1"/>
-    </f:entry>
-
-    <f:entry title="Queue Depth Alert Threshold"
-             description="Log warning when total queue depth reaches this value. Set to 0 to disable.">
-      <f:number field="queueDepthAlertThreshold" min="0" step="1"/>
-    </f:entry>
-
-    <f:entry title="Saturation Alert Poll Count"
-             description="Consecutive saturated polls before a label saturation alert is raised.">
-      <f:number field="saturationAlertPollCount" min="1" step="1"/>
     </f:entry>
 
   </f:section>
@@ -75,6 +50,75 @@
     <f:entry title="Scaling Cooldown (seconds)"
              description="Minimum seconds between any two successive scaling decisions (up or down) on the same agent. This is a hard floor — always respected regardless of queue depth.">
       <f:number field="scalingCooldownSeconds" min="60" step="30"/>
+    </f:entry>
+
+    <f:entry title="Excluded Agents"
+             description="Comma-separated agent (slave) names to skip during executor scale-up and scale-down, e.g. 'agent-1, agent-2'. Takes effect immediately without a restart.">
+      <f:textbox field="scalingExcludedAgents"/>
+    </f:entry>
+
+  </f:section>
+
+
+  <f:section title="Queue Depth Monitor - Build Notifications">
+
+    <f:entry title="Enable Build Notifications"
+             description="POST a JSON payload to the endpoint below after every build completes (success, failure, or abort).">
+      <f:checkbox field="notificationEnabled"/>
+    </f:entry>
+
+    <f:entry title="Endpoint URL"
+             description="Full URL that will receive the HTTP POST. Must start with http:// or https://.">
+      <f:textbox field="notificationEndpointUrl"/>
+    </f:entry>
+
+    <f:entry title="Username"
+             description="Username for HTTP Basic authentication. Fill in both Username and Password to use Basic auth. Leave blank to use Bearer Token instead.">
+      <f:textbox field="notificationUsername"/>
+    </f:entry>
+
+    <f:entry title="Password"
+             description="Password for HTTP Basic authentication. Stored encrypted.">
+      <f:password field="notificationPasswordSecret"/>
+    </f:entry>
+
+    <f:entry title="Bearer Token"
+             description="Token sent as 'Authorization: Bearer …'. Used only when Username is blank. Stored encrypted.">
+      <f:password field="notificationBearerTokenSecret"/>
+    </f:entry>
+
+    <f:entry title="Max Log Lines in Payload"
+             description="Maximum lines of build log to include. 0 means no limit (use with caution on large builds).">
+      <f:number field="notificationMaxLogLines" min="0" step="1000"/>
+    </f:entry>
+
+  </f:section>
+
+  <f:section title="Queue Depth Monitor - Trend Alerts">
+
+    <f:entry title="Enable Trend Email Alerts"
+             description="Send an email when total queue depth rises for several consecutive samples in a row.">
+      <f:checkbox field="trendNotificationEnabled"/>
+    </f:entry>
+
+    <f:entry title="Recipient Email Addresses"
+             description="Comma-separated list of addresses to notify, e.g. 'ops@example.com, oncall@example.com'. Uses the SMTP settings configured under Jenkins Location / E-mail Notification.">
+      <f:textbox field="trendNotificationRecipients"/>
+    </f:entry>
+
+    <f:entry title="Consecutive Increasing Samples"
+             description="How many consecutive polling samples must each exceed the previous one to count as a sustained increasing trend. Minimum 2.">
+      <f:number field="trendSustainedSamples" min="2" step="1"/>
+    </f:entry>
+
+    <f:entry title="Minimum Queue Depth to Alert"
+             description="The latest sample must reach at least this queue depth before a trend alert fires. Filters out noise near zero.">
+      <f:number field="trendMinQueueDepth" min="1" step="1"/>
+    </f:entry>
+
+    <f:entry title="Notification Cooldown (seconds)"
+             description="Minimum seconds between successive trend alert emails. After the first alert, another is sent only once this cooldown elapses AND the increasing trend is still ongoing.">
+      <f:number field="trendNotificationCooldownSeconds" min="60" step="60"/>
     </f:entry>
 
   </f:section>

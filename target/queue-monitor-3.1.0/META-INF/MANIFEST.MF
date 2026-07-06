@@ -1,0 +1,27 @@
+Manifest-Version: 1.0
+Created-By: Maven Archiver 3.6.0
+Build-Jdk-Spec: 21
+Specification-Title: Queue Depth Monitor
+Specification-Version: 3.1
+Implementation-Title: Queue Depth Monitor
+Implementation-Version: 3.1.0
+Group-Id: io.jenkins.plugins
+Artifact-Id: queue-monitor
+Short-Name: queue-monitor
+Long-Name: Queue Depth Monitor
+Url: https://github.com/your-org/queue-monitor-plugin
+Plugin-Version: 3.1.0
+Hudson-Version: 2.541.2
+Jenkins-Version: 2.541.2
+Plugin-Dependencies: workflow-api:1373.v7b_813f10efa_b_,workflow-support
+ :968.v8f17397e87b_8,mailer:489.vd4b_25144138f
+Plugin-Developers: 
+Plugin-License-Name: MIT License
+Plugin-License-Url: https://opensource.org/licenses/MIT
+Plugin-ScmConnection: scm:git:https://github.com/jenkinsci/plugin-pom.gi
+ t/queue-monitor
+Plugin-ScmTag: plugin-4.88
+Plugin-ScmUrl: https://github.com/jenkinsci/plugin-pom/queue-monitor
+Plugin-GitHash: d2148483dabb2a7a2d55b753c1461dea07f05ecb
+Implementation-Build: d2148483dabb2a7a2d55b753c1461dea07f05ecb
+

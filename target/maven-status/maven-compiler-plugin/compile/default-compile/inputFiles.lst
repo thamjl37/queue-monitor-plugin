@@ -1,4 +1,6 @@
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\AgentResourceInfo.java
+C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\AgentUsageTracker.java
+C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\BuildNotifier.java
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\BuildPickupListener.java
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\GlobalConfig.java
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\MetricsStore.java
@@ -6,5 +8,8 @@ C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemoni
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\QueueMetricsCollector.java
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\QueueMonitorAction.java
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\QueueSnapshot.java
+C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\QueueTrendMonitor.java
+C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\QueueTrendNotifier.java
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\ScalingEvent.java
 C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\SchedulingEngine.java
+C:\Coding\JenkinsPlugin\agenticplugin\src\main\java\io\jenkins\plugins\queuemonitor\SlaveUsageDetail.java

@@ -4,9 +4,11 @@ Artifact-Id: queue-monitor
 Short-Name: queue-monitor
 Long-Name: Queue Depth Monitor
 Url: https://github.com/your-org/queue-monitor-plugin
-Plugin-Version: 2.0.0
+Plugin-Version: 3.1.0
 Hudson-Version: 2.541.2
 Jenkins-Version: 2.541.2
+Plugin-Dependencies: workflow-api:1373.v7b_813f10efa_b_,workflow-support
+ :968.v8f17397e87b_8,mailer:489.vd4b_25144138f
 Plugin-Developers: 
 Plugin-License-Name: MIT License
 Plugin-License-Url: https://opensource.org/licenses/MIT
@@ -14,8 +16,8 @@ Plugin-ScmConnection: scm:git:https://github.com/jenkinsci/plugin-pom.gi
  t/queue-monitor
 Plugin-ScmTag: plugin-4.88
 Plugin-ScmUrl: https://github.com/jenkinsci/plugin-pom/queue-monitor
-Plugin-GitHash: ad2874cb7834a3d9bfc578ac596f3e65ae924ed9
-Implementation-Build: ad2874cb7834a3d9bfc578ac596f3e65ae924ed9
+Plugin-GitHash: d2148483dabb2a7a2d55b753c1461dea07f05ecb
+Implementation-Build: d2148483dabb2a7a2d55b753c1461dea07f05ecb
 Libraries: C:\Coding\JenkinsPlugin\agenticplugin\src\main\resources,C:\C
  oding\JenkinsPlugin\agenticplugin\target\classes
 Resource-Path: C:\Coding\JenkinsPlugin\agenticplugin\src\main\webapp

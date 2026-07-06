@@ -7,7 +7,7 @@ import java.util.*;
  */
 public class InjectedTest extends junit.framework.TestCase {
   public static junit.framework.Test suite() throws Exception {
-    System.out.println("Running tests for "+"io.jenkins.plugins:queue-monitor:2.0.0");
+    System.out.println("Running tests for "+"io.jenkins.plugins:queue-monitor:3.1.0");
     Map<String, Object> parameters = new HashMap<String, Object>();
     parameters.put("basedir","C:\\Coding\\JenkinsPlugin\\agenticplugin");
     parameters.put("artifactId","queue-monitor");
