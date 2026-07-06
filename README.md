@@ -1,14 +1,14 @@
 # Queue Depth Monitor — Jenkins Plugin
 
-A Jenkins plugin that monitors build queue depth, executor utilization, build-duration anomalies, and Nexus dependency delays across labeled agents. It also provides intelligent agent selection and resource-aware executor auto-scaling.
+A Jenkins plugin that monitors build queue depth and executor utilization across labeled agents in real time. It provides intelligent agent selection, resource-aware executor auto-scaling, a webhook for build completion events, and email alerts when queue depth trends upward.
 
 ## Features
 
 - **Queue depth monitoring** — tracks queue depth per agent label in real time
 - **Executor utilization** — measures busy vs. total executors globally and per label
-- **Build duration anomaly detection** — flags builds that exceed a configurable multiple of their baseline average
-- **Executor auto-scaling** — scales executors up under queue pressure and back down when the queue is empty, respecting CPU/memory thresholds and a configurable cooldown
+- **Executor auto-scaling** — scales executors up under queue pressure and back down when the queue is empty, respecting CPU/memory thresholds, a configurable cooldown, and an excluded-agents list
 - **Dynamic label recommendations** — suggests label re-assignment to capable agents when scaling is not possible
+- **Queue depth trend email alerts** — emails configurable recipients when queue depth rises for several consecutive polls in a row, with a cooldown to prevent alert spam
 - **Build pickup tracking** — records which agent and label picked up each job and how long it waited
 - **Scaling audit log** — keeps a full history of every scale-up and scale-down decision
 - **Live dashboard** — auto-refreshing UI at `/queue-monitor` with charts and audit tables
@@ -29,7 +29,7 @@ A Jenkins plugin that monitors build queue depth, executor utilization, build-du
 mvn clean package -DskipTests
 ```
 
-The installable plugin artifact is produced at `target/queue-monitor-2.1.0.hpi`.
+The installable plugin artifact is produced at `target/queue-monitor-3.1.0.hpi`.
 
 To run tests:
 
@@ -45,21 +45,18 @@ mvn test
 2. In Jenkins: **Manage Jenkins → Plugins → Advanced → Deploy Plugin**.
 3. Upload `queue-monitor.hpi` and restart Jenkins.
 
+> Depends on the **Mailer** plugin (for trend alert emails) and **Pipeline: API** / **Pipeline: Supporting APIs** (for per-node-block agent tracking). If you install via the plugin manager these are pulled in automatically; a manual `.hpi` upload requires them to already be installed.
+
 ## Configuration
 
-Navigate to **Manage Jenkins → System → Queue Depth Monitor** to configure all settings. Settings are split into three groups.
+Navigate to **Manage Jenkins → System → Queue Depth Monitor** to configure all settings. Settings are split into four groups.
 
 ### General
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Poll Interval (seconds) | 30 | How often the background collector runs (minimum 10) |
-| Retention Hours | 24 | How many hours of snapshot history to keep in memory |
 | Max Snapshots | 2880 | Hard cap on snapshot count (memory budget) |
-| Build Duration Anomaly Factor | 1.5 | Multiplier over baseline average to flag a slow build |
-| Baseline Sample Count | 10 | Minimum samples before anomaly detection activates |
-| Queue Depth Alert Threshold | 10 | Depth per label that triggers an alert (0 = disabled) |
-| Saturation Alert Poll Count | 3 | Consecutive saturated polls before alerting |
 
 ### Executor Scaling
 
@@ -94,6 +91,20 @@ Authentication is selected automatically based on what is filled in:
 | Neither | No `Authorization` header |
 
 Fill in **either** Username/Password **or** Bearer Token — not both. If a Username is present, Basic auth always takes priority.
+
+### Trend Alerts
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Enable Trend Email Alerts | false | Send an email when queue depth rises for several consecutive polls in a row |
+| Recipient Email Addresses | _(empty)_ | Comma-separated list of addresses to notify, e.g. `ops@example.com, oncall@example.com` |
+| Consecutive Increasing Samples | 3 | How many consecutive polls must each exceed the previous one to count as a sustained trend (minimum 2) |
+| Minimum Queue Depth to Alert | 5 | The latest sample must reach at least this depth before an alert fires, filtering out noise near zero |
+| Notification Cooldown (seconds) | 900 | Minimum gap between successive trend alert emails |
+
+Emails are sent through Jenkins' own SMTP configuration — set this up first under **Manage Jenkins → System → E-mail Notification** (Jenkins Location / SMTP server), since the plugin reuses that session rather than configuring its own mail transport.
+
+Once the first alert fires, another is sent only when **both** conditions hold: the cooldown has elapsed, and queue depth is still on a sustained upward trend at that moment. A cooldown expiring during a lull does not trigger a repeat alert.
 
 ## Dashboard
 
@@ -262,14 +273,15 @@ QueueMetricsCollector  (AsyncPeriodicWork)
     │  polls Jenkins every N seconds
     ├─► QueueSnapshot       — immutable point-in-time state
     ├─► MetricsStore        — ConcurrentLinkedDeque ring buffer (bounded)
-    └─► SchedulingEngine    — evaluates queue; scales executors or recommends labels
+    ├─► SchedulingEngine    — evaluates queue; scales executors or recommends labels
+    └─► QueueTrendMonitor   — checks for a sustained increasing queue-depth trend
+                              → QueueTrendNotifier.send() — email via Mailer plugin, cooldown-gated
 
 BuildPickupListener    (RunListener)
     │  fires on job start, completion, and finalization
     ├─► onStarted:    records PickupEvent (agent, label, wait time)
     │                 captures AgentStart (agent name, label, timestamp) in ConcurrentHashMap
-    ├─► onCompleted:  detects duration anomalies against per-job baseline
-    │                 refreshes pipeline label hints
+    ├─► onCompleted:  refreshes pipeline label hints
     └─► onFinalized:  builds full payload (job details + agent usage + log)
                       → BuildNotifier.send() — HTTP POST to configured endpoint
 
@@ -279,13 +291,20 @@ BuildNotifier
     ├─► applies configured auth (NONE / API_KEY / BASIC / BEARER)
     └─► fires HTTP POST via java.net.HttpURLConnection
 
+QueueTrendMonitor      (Extension singleton)
+    │  evaluated once per poll cycle, right after a fresh snapshot is stored
+    ├─► flags N consecutive strictly-increasing snapshots above a min-depth floor
+    ├─► tracks lastNotifiedAt in memory for the cooldown window
+    └─► QueueTrendNotifier — builds and sends the alert email (jakarta.mail via Mailer plugin)
+
 QueueMonitorAction     (RootAction @ /queue-monitor)
     ├─► serves the Jelly dashboard (index.jelly)
     └─► exposes REST endpoints (doApiSnapshot, doApiHistory, doApiPickups, doApiScaling)
 
 GlobalConfig           (GlobalConfiguration @ Manage Jenkins → System)
     └─► all tuneable settings with safe defaults
-        includes notification endpoint, auth credentials (Secret), and log-line cap
+        includes notification endpoint, auth credentials (Secret), log-line cap,
+        and trend-alert recipients/thresholds/cooldown
 ```
 
 ## License
