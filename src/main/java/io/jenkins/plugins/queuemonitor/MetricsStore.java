@@ -30,12 +30,6 @@ public class MetricsStore extends GlobalConfiguration {
     private final Deque<PickupEvent>   pickups      = new ConcurrentLinkedDeque<>();
     private final Deque<ScalingEvent>  scalingAudit = new ConcurrentLinkedDeque<>();
 
-    // Per-job build duration history: jobName → list of recent durations (ms)
-    private final Map<String, Deque<Long>> buildDurations = new HashMap<>();
-
-    // Consecutive saturation poll counters per label
-    private final Map<String, Integer> saturationCounters = new HashMap<>();
-
     public static MetricsStore get() {
         return GlobalConfiguration.all().get(MetricsStore.class);
     }
@@ -47,7 +41,6 @@ public class MetricsStore extends GlobalConfiguration {
     public synchronized void addSnapshot(QueueSnapshot s) {
         snapshots.addLast(s);
         evict(snapshots);
-        checkAlerts(s);
     }
 
     public List<QueueSnapshot> getSnapshots() {
@@ -154,28 +147,6 @@ public class MetricsStore extends GlobalConfiguration {
     }
 
     // -----------------------------------------------------------------------
-    // Build duration baseline
-    // -----------------------------------------------------------------------
-
-    public synchronized void recordBuildDuration(String jobName, long durationMs) {
-        Deque<Long> hist = buildDurations.computeIfAbsent(jobName, k -> new ArrayDeque<>());
-        hist.addLast(durationMs);
-        // Keep a rolling window of 100 samples per job
-        while (hist.size() > 100) hist.pollFirst();
-    }
-
-    /**
-     * Returns the baseline average for a job, or -1 if insufficient data.
-     */
-    public synchronized double getBaselineAvgMs(String jobName) {
-        GlobalConfig cfg = GlobalConfig.get();
-        int required = cfg != null ? cfg.getBaselineSampleCount() : 10;
-        Deque<Long> hist = buildDurations.get(jobName);
-        if (hist == null || hist.size() < required) return -1;
-        return hist.stream().mapToLong(Long::longValue).average().orElse(-1);
-    }
-
-    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
@@ -183,33 +154,6 @@ public class MetricsStore extends GlobalConfiguration {
         GlobalConfig cfg = GlobalConfig.get();
         int maxItems = cfg != null ? cfg.getMaxSnapshots() : 2880;
         while (deque.size() > maxItems) deque.pollFirst();
-    }
-
-    private void checkAlerts(QueueSnapshot s) {
-        GlobalConfig cfg = GlobalConfig.get();
-        if (cfg == null) return;
-
-        int queueThreshold  = cfg.getQueueDepthAlertThreshold();
-        int satPollRequired = cfg.getSaturationAlertPollCount();
-
-        if (queueThreshold > 0 && s.totalQueueDepth >= queueThreshold) {
-            LOG.warning(String.format(
-                "[QueueMonitor] ALERT: Total queue depth %d reached threshold %d",
-                s.totalQueueDepth, queueThreshold));
-        }
-
-        for (String label : s.totalByLabel.keySet()) {
-            if (s.isLabelSaturated(label)) {
-                int count = saturationCounters.merge(label, 1, Integer::sum);
-                if (count >= satPollRequired) {
-                    LOG.warning(String.format(
-                        "[QueueMonitor] ALERT: Label '%s' has been saturated for %d consecutive polls",
-                        label, count));
-                }
-            } else {
-                saturationCounters.remove(label);
-            }
-        }
     }
 
     @Override

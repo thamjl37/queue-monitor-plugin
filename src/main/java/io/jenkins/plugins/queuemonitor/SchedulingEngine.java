@@ -140,10 +140,18 @@ public class SchedulingEngine {
             List<AgentResourceInfo> agents, Jenkins jenkins, GlobalConfig cfg) {
 
         int floor = cfg.getMinExecutorsPerAgent();
+        java.util.Set<String> excluded = cfg.getScalingExcludedAgentSet();
 
         for (AgentResourceInfo info : agents) {
             // Never scale the built-in controller
             if ("built-in".equals(info.nodeName)) continue;
+
+            // Skip agents on the configured exclusion list
+            if (excluded.contains(info.nodeName)) {
+                LOG.fine(String.format(
+                    "[QueueMonitor] Scale-down skip '%s': excluded via configuration", info.nodeName));
+                continue;
+            }
 
             // Never reduce below the floor
             if (info.currentExecutors <= floor) continue;
@@ -255,10 +263,18 @@ public class SchedulingEngine {
 
         // Always prefer label-compatible agents; fall back to all agents only if none exist
         List<AgentResourceInfo> candidates = compatible.isEmpty() ? allAgents : compatible;
+        java.util.Set<String> excluded = cfg.getScalingExcludedAgentSet();
 
         for (AgentResourceInfo info : candidates) {
             // Never scale the built-in controller
             if ("built-in".equals(info.nodeName)) continue;
+
+            // Skip agents on the configured exclusion list
+            if (excluded.contains(info.nodeName)) {
+                LOG.info(String.format(
+                    "[QueueMonitor] Scaling skip '%s': excluded via configuration", info.nodeName));
+                continue;
+            }
 
             if (isOnCooldown(info.nodeName, cfg)) {
                 LOG.info(String.format("[QueueMonitor] Scaling skip '%s': on cooldown", info.nodeName));

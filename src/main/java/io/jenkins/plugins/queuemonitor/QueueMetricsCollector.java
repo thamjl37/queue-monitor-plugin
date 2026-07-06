@@ -156,6 +156,12 @@ public class QueueMetricsCollector extends hudson.model.AsyncPeriodicWork {
         } catch (Exception e) {
             LOG.log(Level.WARNING, "[QueueMonitor] Scheduling engine error", e);
         }
+        try {
+            QueueTrendMonitor trendMonitor = QueueTrendMonitor.get();
+            if (trendMonitor != null) trendMonitor.evaluate();
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "[QueueMonitor] Trend monitor error", e);
+        }
     }
 
     public static QueueMetricsCollector get() {

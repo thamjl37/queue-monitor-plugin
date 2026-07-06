@@ -25,7 +25,6 @@ import java.util.regex.Pattern;
 /**
  * Listens for build lifecycle events to:
  *   - Record execution pickup events (agent, label, queue wait time)
- *   - Detect build-duration anomalies against a per-job baseline
  *   - POST a JSON payload to the configured webhook endpoint after every build
  *
  * Agent usage timing for pipeline builds is provided by AgentUsageTracker
@@ -75,17 +74,6 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
 
     @Override
     public void onCompleted(Run<?, ?> run, TaskListener listener) {
-        try {
-            long duration = run.getDuration();
-            if (duration > 0) {
-                MetricsStore store = MetricsStore.get();
-                if (store != null) store.recordBuildDuration(run.getParent().getFullName(), duration);
-                checkDurationAnomaly(run, duration);
-            }
-        } catch (Exception e) {
-            LOG.fine("[QueueMonitor] Could not record duration: " + e.getMessage());
-        }
-
         // Refresh pipeline label hints now that all node() steps have completed
         try {
             String jobName = run.getParent().getFullName();
@@ -294,24 +282,6 @@ public class BuildPickupListener extends RunListener<Run<?, ?>> {
             }
         } catch (Exception e) {
             LOG.fine("[QueueMonitor] liveRefreshHints error: " + e.getMessage());
-        }
-    }
-
-    private void checkDurationAnomaly(Run<?, ?> run, long durationMs) {
-        MetricsStore store = MetricsStore.get();
-        GlobalConfig cfg   = GlobalConfig.get();
-        if (store == null || cfg == null) return;
-
-        String jobName = run.getParent().getFullName();
-        double baseline = store.getBaselineAvgMs(jobName);
-        if (baseline <= 0) return;
-
-        double factor = (double) durationMs / baseline;
-        if (factor >= cfg.getBuildDurationAnomalyFactor()) {
-            LOG.warning(String.format(
-                "[QueueMonitor] ALERT: Build '%s #%d' took %.1f× baseline (%.1fs vs avg %.1fs). Possible Nexus delay.",
-                jobName, run.getNumber(),
-                factor, durationMs / 1000.0, baseline / 1000.0));
         }
     }
 

@@ -23,31 +23,8 @@ public class GlobalConfig extends GlobalConfiguration {
     /** How often (seconds) the background collector runs. Min 10 to avoid overloading. */
     private int pollIntervalSeconds = 30;
 
-    /** How many hours of snapshot history to retain in memory. */
-    private int retentionHours = 24;
-
     /** Maximum number of snapshots to keep (caps memory usage regardless of retention). */
     private int maxSnapshots = 2880; // 24 h × 2/min
-
-    // -----------------------------------------------------------------------
-    // Anomaly detection
-    // -----------------------------------------------------------------------
-
-    /** Multiplier over baseline average before a build is flagged as slow. */
-    private double buildDurationAnomalyFactor = 1.5;
-
-    /** Minimum baseline samples required before anomaly detection activates. */
-    private int baselineSampleCount = 10;
-
-    // -----------------------------------------------------------------------
-    // Alert thresholds
-    // -----------------------------------------------------------------------
-
-    /** Queue depth per label above which an alert is raised (0 = disabled). */
-    private int queueDepthAlertThreshold = 10;
-
-    /** Consecutive polls a label must be saturated before alerting. */
-    private int saturationAlertPollCount = 3;
 
     // -----------------------------------------------------------------------
     // Intelligent scheduling / scaling
@@ -74,6 +51,9 @@ public class GlobalConfig extends GlobalConfiguration {
     /** Cooldown in seconds between successive scaling decisions on the same agent. */
     private int scalingCooldownSeconds = 300;
 
+    /** Comma-separated agent (slave) names to exclude from executor scale-up/scale-down. */
+    private String scalingExcludedAgents = "";
+
     // -----------------------------------------------------------------------
     // Build notification / webhook
     // -----------------------------------------------------------------------
@@ -95,6 +75,25 @@ public class GlobalConfig extends GlobalConfiguration {
 
     /** Maximum lines of build log to include in the payload (0 = unlimited). */
     private int notificationMaxLogLines = 5000;
+
+    // -----------------------------------------------------------------------
+    // Queue depth trend detection / email alerting
+    // -----------------------------------------------------------------------
+
+    /** Send an email when a sustained increasing queue-depth trend is detected. */
+    private boolean trendNotificationEnabled = false;
+
+    /** Comma-separated email addresses to notify when a trend alert fires. */
+    private String trendNotificationRecipients = "";
+
+    /** Number of consecutive samples that must each exceed the previous one to count as a sustained trend. */
+    private int trendSustainedSamples = 3;
+
+    /** Latest sample's queue depth must reach at least this value before a trend alert is considered. */
+    private int trendMinQueueDepth = 5;
+
+    /** Minimum seconds between successive trend alert emails, even while the trend continues. */
+    private int trendNotificationCooldownSeconds = 900;
 
     // -----------------------------------------------------------------------
     // Singleton accessor
@@ -125,40 +124,10 @@ public class GlobalConfig extends GlobalConfiguration {
         this.pollIntervalSeconds = Math.max(10, v);
     }
 
-    public int getRetentionHours() { return retentionHours; }
-    @DataBoundSetter
-    public void setRetentionHours(int v) {
-        this.retentionHours = Math.max(1, v);
-    }
-
     public int getMaxSnapshots() { return maxSnapshots; }
     @DataBoundSetter
     public void setMaxSnapshots(int v) {
         this.maxSnapshots = Math.max(100, v);
-    }
-
-    public double getBuildDurationAnomalyFactor() { return buildDurationAnomalyFactor; }
-    @DataBoundSetter
-    public void setBuildDurationAnomalyFactor(double v) {
-        this.buildDurationAnomalyFactor = Math.max(1.1, v);
-    }
-
-    public int getBaselineSampleCount() { return baselineSampleCount; }
-    @DataBoundSetter
-    public void setBaselineSampleCount(int v) {
-        this.baselineSampleCount = Math.max(3, v);
-    }
-
-    public int getQueueDepthAlertThreshold() { return queueDepthAlertThreshold; }
-    @DataBoundSetter
-    public void setQueueDepthAlertThreshold(int v) {
-        this.queueDepthAlertThreshold = Math.max(0, v);
-    }
-
-    public int getSaturationAlertPollCount() { return saturationAlertPollCount; }
-    @DataBoundSetter
-    public void setSaturationAlertPollCount(int v) {
-        this.saturationAlertPollCount = Math.max(1, v);
     }
 
     public boolean isDynamicLabelEnabled() { return dynamicLabelEnabled; }
@@ -199,6 +168,28 @@ public class GlobalConfig extends GlobalConfiguration {
         this.scalingCooldownSeconds = Math.max(60, v);
     }
 
+    public String getScalingExcludedAgents() { return scalingExcludedAgents; }
+    @DataBoundSetter
+    public void setScalingExcludedAgents(String v) {
+        this.scalingExcludedAgents = v != null ? v.trim() : "";
+    }
+
+    /**
+     * Parses {@link #scalingExcludedAgents} into a set of trimmed, non-empty agent names.
+     * Recomputed on every call so edits via the config UI take effect without a restart.
+     */
+    public java.util.Set<String> getScalingExcludedAgentSet() {
+        if (scalingExcludedAgents == null || scalingExcludedAgents.isBlank()) {
+            return java.util.Collections.emptySet();
+        }
+        java.util.Set<String> result = new java.util.HashSet<>();
+        for (String name : scalingExcludedAgents.split(",")) {
+            String trimmed = name.trim();
+            if (!trimmed.isEmpty()) result.add(trimmed);
+        }
+        return result;
+    }
+
     // -----------------------------------------------------------------------
     // Form validation
     // -----------------------------------------------------------------------
@@ -206,12 +197,6 @@ public class GlobalConfig extends GlobalConfiguration {
     public FormValidation doCheckPollIntervalSeconds(@QueryParameter int value) {
         return value < 10
             ? FormValidation.warning("Minimum recommended interval is 10 seconds to avoid controller overload.")
-            : FormValidation.ok();
-    }
-
-    public FormValidation doCheckBuildDurationAnomalyFactor(@QueryParameter double value) {
-        return value < 1.1
-            ? FormValidation.error("Factor must be at least 1.1 (10% above baseline).")
             : FormValidation.ok();
     }
 
@@ -275,6 +260,71 @@ public class GlobalConfig extends GlobalConfiguration {
         if (!value.startsWith("http://") && !value.startsWith("https://")) {
             return FormValidation.error("URL must start with http:// or https://");
         }
+        return FormValidation.ok();
+    }
+
+    // -----------------------------------------------------------------------
+    // Trend alerting getters / setters
+    // -----------------------------------------------------------------------
+
+    public boolean isTrendNotificationEnabled() { return trendNotificationEnabled; }
+    @DataBoundSetter
+    public void setTrendNotificationEnabled(boolean v) { this.trendNotificationEnabled = v; }
+
+    public String getTrendNotificationRecipients() { return trendNotificationRecipients; }
+    @DataBoundSetter
+    public void setTrendNotificationRecipients(String v) {
+        this.trendNotificationRecipients = v != null ? v.trim() : "";
+    }
+
+    /**
+     * Parses {@link #trendNotificationRecipients} into trimmed, non-empty email addresses.
+     * Recomputed on every call so edits via the config UI take effect without a restart.
+     */
+    public java.util.List<String> getTrendNotificationRecipientList() {
+        if (trendNotificationRecipients == null || trendNotificationRecipients.isBlank()) {
+            return java.util.Collections.emptyList();
+        }
+        java.util.List<String> result = new java.util.ArrayList<>();
+        for (String addr : trendNotificationRecipients.split(",")) {
+            String trimmed = addr.trim();
+            if (!trimmed.isEmpty()) result.add(trimmed);
+        }
+        return result;
+    }
+
+    public int getTrendSustainedSamples() { return trendSustainedSamples; }
+    @DataBoundSetter
+    public void setTrendSustainedSamples(int v) {
+        this.trendSustainedSamples = Math.max(2, v);
+    }
+
+    public int getTrendMinQueueDepth() { return trendMinQueueDepth; }
+    @DataBoundSetter
+    public void setTrendMinQueueDepth(int v) {
+        this.trendMinQueueDepth = Math.max(1, v);
+    }
+
+    public int getTrendNotificationCooldownSeconds() { return trendNotificationCooldownSeconds; }
+    @DataBoundSetter
+    public void setTrendNotificationCooldownSeconds(int v) {
+        this.trendNotificationCooldownSeconds = Math.max(60, v);
+    }
+
+    public FormValidation doCheckTrendNotificationRecipients(@QueryParameter String value) {
+        if (value == null || value.isBlank()) return FormValidation.ok();
+        for (String addr : value.split(",")) {
+            String trimmed = addr.trim();
+            if (trimmed.isEmpty()) continue;
+            if (!trimmed.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+                return FormValidation.error("Invalid email address: " + trimmed);
+            }
+        }
+        return FormValidation.ok();
+    }
+
+    public FormValidation doCheckTrendSustainedSamples(@QueryParameter int value) {
+        if (value < 2) return FormValidation.error("Must be at least 2 to detect a trend.");
         return FormValidation.ok();
     }
 

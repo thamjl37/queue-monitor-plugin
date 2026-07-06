@@ -13,7 +13,7 @@
 
   <groupId>io.jenkins.plugins</groupId>
   <artifactId>queue-monitor</artifactId>
-  <version>3.0.0</version>
+  <version>3.1.0</version>
   <packaging>hpi</packaging>
 
   <name>Queue Depth Monitor</name>
@@ -90,6 +90,12 @@
     <dependency>
       <groupId>org.jenkins-ci.plugins.workflow</groupId>
       <artifactId>workflow-support</artifactId>
+    </dependency>
+
+    <!-- Mailer plugin for queue-depth trend email alerts -->
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>mailer</artifactId>
     </dependency>
 
     <!-- Test dependencies -->

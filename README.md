@@ -72,6 +72,7 @@ Navigate to **Manage Jenkins → System → Queue Depth Monitor** to configure a
 | Scaling Min Free CPU % | 20 | Minimum free CPU before adding an executor |
 | Scaling Min Free Memory MB | 256 | Minimum free RAM before adding an executor |
 | Scaling Cooldown (seconds) | 300 | Minimum gap between scaling decisions on the same agent |
+| Excluded Agents | _(empty)_ | Comma-separated agent names to skip during executor scale-up/scale-down |
 
 ### Build Notifications
 
